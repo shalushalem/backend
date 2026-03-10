@@ -83,7 +83,7 @@ def generate_natural_romanized(english_text: str, lang_type: str) -> str:
     strict_romanized = translations["romanized"]
     
     # Use the prompt from prompts.py
-    prompt = prompts.NATURAL_ROMANIZED_PROMPT.format(lang_type=lang_type.upper(), english_text=english_text)
+    prompt = prompts.get_romanized_rewrite_prompt(english_text, lang_type)
     
     ans = generate_text(prompt, options={"temperature": 0.2})
     

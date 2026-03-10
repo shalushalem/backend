@@ -1,10 +1,25 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from celery.result import AsyncResult
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
+
 from worker import celery_app
 
 # Import routers
-from routers import chat, audio, vision, stylist, bg_remover, reddit
+from routers import chat, audio, vision, stylist, bg_remover, reddit, style_engine
+
+# 🚀 INITIALIZE SENTRY FOR FASTAPI
+sentry_sdk.init(
+    dsn="https://048fb4207a04a4a4208a1a97af611e1e@o4511020944392192.ingest.de.sentry.io/4511020965888080", # <--- Replace with your Sentry DSN!
+    traces_sample_rate=1.0,
+    profiles_sample_rate=1.0,
+    integrations=[
+        FastApiIntegration(),
+        RedisIntegration(), # Tracks if Redis goes down!
+    ],
+)
 
 app = FastAPI(title="Ahvi AI Fashion Assistant Backend")
 
@@ -24,8 +39,9 @@ app.include_router(vision.router)
 app.include_router(stylist.router)
 app.include_router(bg_remover.router)
 app.include_router(reddit.router)
+app.include_router(style_engine.router)
 
-# 🚀 NEW ENDPOINT: Check the status of a Celery background task
+# 🚀 ENDPOINT: Check the status of a Celery background task
 @app.get("/api/tasks/{job_id}")
 def get_task_status(job_id: str):
     # Ask Celery/Redis what the status of this specific job is
@@ -42,4 +58,4 @@ def get_task_status(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
