@@ -1,0 +1,91 @@
+import json
+import re
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import List, Dict, Any
+from deep_translator import GoogleTranslator
+
+from services import translation, llm_service, audio_service
+from utils import wardrobe_parser
+import prompts
+
+router = APIRouter()
+
+class Message(BaseModel):
+    role: str
+    content: str
+
+class TextChatRequest(BaseModel):
+    messages: List[Message]
+    language: str 
+    current_memory: str
+    user_profile: Dict[str, Any] = {} 
+    wardrobe_items: List[Dict[str, Any]] = []
+
+@router.post("/api/text")
+def text_chat(request: TextChatRequest):
+    raw_user_input = request.messages[-1].content
+    user_memory = request.current_memory
+    wardrobe = request.wardrobe_items 
+    
+    # 1. Detect & Translate
+    has_telugu = bool(re.search(r'[\u0C00-\u0C7F]', raw_user_input))
+    has_hindi = bool(re.search(r'[\u0900-\u097F]', raw_user_input))
+    target_lang = "en"
+    
+    if has_telugu:
+        input_type, target_lang = "telugu_script", "te"
+        try: english_input = GoogleTranslator(source='te', target='en').translate(raw_user_input)
+        except: english_input = raw_user_input
+    elif has_hindi:
+        input_type, target_lang = "hindi_script", "hi"
+        try: english_input = GoogleTranslator(source='hi', target='en').translate(raw_user_input)
+        except: english_input = raw_user_input
+    else:
+        input_type = translation.dynamic_nlp_language_detector(raw_user_input)
+        if input_type == "tanglish": target_lang, english_input = "te", translation.transliterate_and_translate(raw_user_input, "te")
+        elif input_type == "hinglish": target_lang, english_input = "hi", translation.transliterate_and_translate(raw_user_input, "hi")
+        else: english_input = raw_user_input 
+
+    # 2. Update Memory
+    mem_prompt = prompts.UPDATE_MEMORY_PROMPT.format(new_user_text=english_input, current_memory=user_memory)
+    new_memory_res = llm_service.generate_text(mem_prompt, options={"temperature": 0.0})
+    new_memory = new_memory_res if new_memory_res and "none" not in new_memory_res.lower() else user_memory
+
+    # 3. Setup LLM Chat Context
+    processed_messages = [{"role": msg.role, "content": msg.content} for msg in request.messages[:-1]]
+    processed_messages.append({"role": "user", "content": english_input})
+    
+    with open("system_prompt.txt", "r") as f:
+        system_instruction = f.read()
+    
+    system_instruction += f"\nWHAT YOU KNOW ABOUT THEIR TASTE: {new_memory}\n"
+    if wardrobe:
+        system_instruction += f"\n--- USER'S VIRTUAL WARDROBE ---\n{json.dumps(wardrobe)}\n"
+
+    # 4. Generate & Parse Response
+    llama_english_response = llm_service.chat_completion(processed_messages, system_instruction)
+    chips_list, llama_english_response = wardrobe_parser.extract_chips(llama_english_response)
+    llama_english_response, pack_tag, board_tag = wardrobe_parser.process_wardrobe_tags(llama_english_response, wardrobe)
+
+    # 5. Translate Back & Audio
+    if input_type in ["telugu_script", "hindi_script", "tanglish", "hinglish"]:
+        if "script" in input_type:
+            final_output = translation.translate_to_script_and_romanized(llama_english_response, target_lang)["native_script"]
+        else:
+            final_output = translation.generate_natural_romanized(llama_english_response, input_type)
+    else:
+        final_output = llama_english_response
+
+    audio_base64 = audio_service.generate_cloned_audio(final_output, target_lang)
+
+    if board_tag: final_output = f"{final_output}\n{board_tag}"
+    if pack_tag: final_output = f"{final_output}\n{pack_tag}"
+
+    return {
+        "message": {"role": "assistant", "content": final_output},
+        "updated_memory": new_memory,
+        "images": [], 
+        "chips": chips_list,
+        "audio_base64": audio_base64 
+    }
