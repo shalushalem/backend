@@ -8,7 +8,7 @@ from sentry_sdk.integrations.redis import RedisIntegration
 from worker import celery_app
 
 # Import routers
-from routers import chat, audio, vision, stylist, bg_remover, reddit, style_engine
+from routers import chat, audio, vision, stylist, bg_remover, reddit, style_engine, garment_analyzer
 
 # 🚀 INITIALIZE SENTRY FOR FASTAPI
 sentry_sdk.init(
@@ -40,6 +40,7 @@ app.include_router(stylist.router)
 app.include_router(bg_remover.router)
 app.include_router(reddit.router)
 app.include_router(style_engine.router)
+app.include_router(garment_analyzer.router)
 
 # 🚀 ENDPOINT: Check the status of a Celery background task
 @app.get("/api/tasks/{job_id}")
