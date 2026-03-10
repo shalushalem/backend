@@ -34,7 +34,11 @@ def analyze_image(request: ImageAnalyzeRequest):
         raw_response = response.json().get("response", "{}")
         
         # Safe JSON extraction regex
-        clean_response = re.sub(r'
-http://googleusercontent.com/immersive_entry_chip/0
-
-**To be crystal clear:** I gave you the big file earlier because that's what you pasted to me. If your setup is already split up, use the two blocks above! Let me know if that clears up the `AttributeError` crash you were getting.
+        clean_response = re.sub(r'```json|```', '', raw_response).strip()
+        
+        return json.loads(clean_response)
+        
+    except Exception as e:
+        print(f"Image Analyze Error: {str(e)}")
+        # Returns a safe default if parsing or the network request fails
+        return {"name": "New Item", "category": "Tops", "tags": []}

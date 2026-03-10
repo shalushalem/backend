@@ -63,10 +63,15 @@ def text_chat(request: TextChatRequest):
     if wardrobe:
         system_instruction += f"\n--- USER'S VIRTUAL WARDROBE ---\n{json.dumps(wardrobe)}\n"
 
-    # 4. Generate & Parse Response
+    # 4. Generate & Parse Response (FIXED)
     llama_english_response = llm_service.chat_completion(processed_messages, system_instruction)
-    chips_list, llama_english_response = wardrobe_parser.extract_chips(llama_english_response)
-    llama_english_response, pack_tag, board_tag = wardrobe_parser.process_wardrobe_tags(llama_english_response, wardrobe)
+    
+    # Use the unified parser function from utils/wardrobe_parser.py
+    parsed_data = wardrobe_parser.extract_and_clean_response(llama_english_response, wardrobe)
+    llama_english_response = parsed_data["cleaned_text"]
+    chips_list = parsed_data["chips"]
+    pack_tag = parsed_data["pack_tag"]
+    board_tag = parsed_data["board_tag"]
 
     # 5. Translate Back & Audio
     if input_type in ["telugu_script", "hindi_script", "tanglish", "hinglish"]:

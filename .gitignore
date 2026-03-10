@@ -1,0 +1,8 @@
+# Ignore AI model weights
+*.safetensors
+*.bin
+*.onnx
+RMBG_2_0/onnx/
+
+# Ignore secrets
+.env
