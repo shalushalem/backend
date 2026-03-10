@@ -37,7 +37,7 @@ def dynamic_nlp_language_detector(text: str) -> str:
     isolated_phrase = " ".join(foreign_words)
     
     # Use the prompt from prompts.py
-    prompt = prompts.LANGUAGE_DETECT_PROMPT.format(isolated_phrase=isolated_phrase)
+    prompt = prompts.get_language_detection_prompt(isolated_phrase)
     
     ans = generate_text(prompt, options={"temperature": 0.0}).upper()
     

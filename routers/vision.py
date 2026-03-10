@@ -27,7 +27,6 @@ def analyze_image(request: ImageAnalyzeRequest):
         
         raw_response = response.json().get("response", "{}")
         
-        # FIXED: Removed the stray URL and correctly formed the regex.
         # This removes markdown code block formatting if the model outputs it.
         clean_response = re.sub(r"```json|```", "", raw_response).strip()
         

@@ -42,8 +42,13 @@ def get_language_detection_prompt(isolated_phrase: str) -> str:
 
 def get_romanized_rewrite_prompt(english_text: str, lang_type: str) -> str:
     return (
-        f"Rewrite this into natural, casual {lang_type.upper()} (WhatsApp style): '{english_text}'\n"
-        "KEEP fashion words in English. No intro, no quotes."
+        f"Rewrite this into natural, highly conversational {lang_type.upper()} (WhatsApp style): '{english_text}'\n"
+        "RULES FOR REALISM AND HUMOR:\n"
+        "1. Sound like a fun, slightly sassy fashion-forward best friend.\n"
+        "2. Use casual filler words (like 'yaar', 'arey', 'literally', 'tbh') where appropriate for the language.\n"
+        "3. Keep fashion terminology in English.\n"
+        "4. Do not be overly polite or robotic. Add a touch of friendly sarcasm if they pick a boring outfit.\n"
+        "5. No intro, no quotes, just the raw text."
     )
 
 def get_outfit_naming_prompt(items_str: str) -> str:

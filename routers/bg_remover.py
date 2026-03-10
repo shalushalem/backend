@@ -1,3 +1,4 @@
+import os
 import io
 import base64
 import torch
@@ -20,7 +21,10 @@ class BGRemoveRequest(BaseModel):
 # ⚠️ SECURITY WARNING: It is highly recommended to use an environment variable 
 # (.env file) for your HuggingFace token instead of hardcoding it!
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
-login(HF_TOKEN)
+if hf_token:
+    login(token=hf_token)
+else:
+    print("⚠️ Warning: HUGGINGFACE_TOKEN environment variable not found. Downloading the model might fail if it requires authentication.")
 
 print("Downloading/Checking RMBG-2.0 model locally...")
 model_path = snapshot_download(
