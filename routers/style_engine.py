@@ -65,13 +65,15 @@ def generate_style_board(request: StyleRequest):
             raise ValueError("No tops or dresses found in wardrobe.")
 
         # STEP 2: The Strategist LLM (Creative Brain)
-        # We only send the Tops/Dresses to save tokens and speed things up!
+        # Bulletproof Prompt: Force it to act like a data processor, not a conversationalist
         system_instruction = (
-            "You are Ahvi's Master Fashion Stylist. Your job is to create a styling strategy. "
-            "1. Select the absolute best 'Master Piece' (Top or Dress) from the provided JSON list that fits the Occasion and User Tastes. "
-            "2. Suggest the ideal complementary HEX color for the Bottoms to match the Master Piece. "
-            "3. Suggest the ideal HEX color for Footwear. "
-            "OUTPUT STRICTLY VALID JSON ONLY. Keys must be: 'master_piece_id', 'target_bottom_hex', 'target_shoe_hex'."
+            "You are a strict data-processing engine. You do not converse. You do not explain. "
+            "Your ONLY job is to output a raw JSON object based on the wardrobe provided.\n"
+            "1. Select the absolute best 'Master Piece' (Top or Dress) ID.\n"
+            "2. Suggest the ideal complementary HEX color for Bottoms.\n"
+            "3. Suggest the ideal HEX color for Footwear.\n\n"
+            "CRITICAL: Output ONLY valid JSON. No markdown blocks, no 'Here is your outfit', NO extra text. "
+            "Required strictly matching keys: 'master_piece_id', 'target_bottom_hex', 'target_shoe_hex'."
         )
         
         user_prompt = (
@@ -82,8 +84,13 @@ def generate_style_board(request: StyleRequest):
         
         messages = [{"role": "user", "content": user_prompt}]
         
-        # We can use the faster text model for this
-        response_text = llm_service.chat_completion(messages, system_instruction, model="llama3.1")
+        # EXACT FIX: Pass response_format="json" to lock the LLM into JSON generation mode
+        response_text = llm_service.chat_completion(
+            messages, 
+            system_instruction, 
+            model="llama3.1",
+            response_format="json" 
+        )
         
         # Clean and parse the JSON safely
         clean_json = re.sub(r'```json|```', '', response_text).strip()
@@ -99,7 +106,7 @@ def generate_style_board(request: StyleRequest):
         target_bottom_color = strategy.get("target_bottom_hex", "#000000")
         best_bottom = find_closest_item(target_bottom_color, bottoms)
         if best_bottom:
-            final_outfit_ids.append(best_bottom.get("$id") or best_bottom.get("id")) # Handles Appwrite's $id format
+            final_outfit_ids.append(best_bottom.get("$id") or best_bottom.get("id"))
             
         # 3C. Instantly find the closest matching shoes using math
         target_shoe_color = strategy.get("target_shoe_hex", "#000000")
@@ -116,7 +123,7 @@ def generate_style_board(request: StyleRequest):
         return {
             "success": True,
             "board_tag": board_tag,
-            "debug_strategy": strategy # Sending this back so you can see why it picked those colors!
+            "debug_strategy": strategy
         }
         
     except Exception as e:

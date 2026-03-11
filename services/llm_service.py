@@ -16,12 +16,17 @@ def generate_text(prompt: str, model: str = "llama3.1", options: dict = None) ->
         print(f"LLM Generate Error: {e}")
         return ""
 
-def chat_completion(messages: list, system_instruction: str, model: str = "llama3.1") -> str:
+def chat_completion(messages: list, system_instruction: str, model: str = "llama3.1", response_format: str = None) -> str:
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": system_instruction}] + messages,
         "stream": False
     }
+    
+    # EXACT FIX: Force Ollama to only output JSON characters
+    if response_format == "json":
+        payload["format"] = "json"
+        
     try:
         # EXACT FIX: INCREASED TIMEOUT HERE (was 120)
         response = requests.post(URL_CHAT, json=payload, timeout=300) 
