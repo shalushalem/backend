@@ -59,14 +59,18 @@ def text_chat(request: TextChatRequest):
     style_tag = ""
     if is_style_req and wardrobe:
         print("🧠 Routing to Brain #2 (Style Engine)...")
-        # 💥 NEW AGGRESSIVE PROMPT FOR BRAIN 2 💥
+        # 💥 UPDATED SMART PROMPT FOR BRAIN 2 (ALLOWS ONE-PIECES) 💥
         style_sys_prompt = (
-            "You are a strict fashion stylist AI. Your ONLY job is to select a complete outfit from the provided JSON wardrobe.\n"
+            "You are an expert fashion stylist AI. Your ONLY job is to select a logical, complete outfit from the provided JSON wardrobe based on the occasion.\n"
             "CRITICAL RULES:\n"
-            "1. You MUST select at least 3 items: A Top (or dress/suit/saree), a Bottom, and Footwear. This is NON-NEGOTIABLE.\n"
-            "2. If the user asks for a specific item (like a saree) and they do NOT own it, IGNORE their request and build a full alternative outfit using ONLY the items they actually have.\n"
-            "3. Output ONLY a single tag in this exact format: [STYLE_BOARD: Exact Item Name 1, Exact Item Name 2, Exact Item Name 3]\n"
-            "4. NEVER output conversational text or explanations."
+            "1. You MUST build a COMPLETE outfit. A complete outfit can be:\n"
+            "   - Option A: [Top + Bottom + Footwear]\n"
+            "   - Option B: [One-Piece (Dress/Saree/Suit/Kurta) + Footwear]\n"
+            "2. NEVER suggest an incomplete outfit (e.g., a top without a bottom, unless it is a full-body dress/saree).\n"
+            "3. Do not suggest two bottoms or two tops. Pick exactly what is needed for one person to wear.\n"
+            "4. If the user asks for a traditional item (like a saree) and they do NOT own it, IGNORE their request and build the best alternative full outfit using ONLY items they actually have.\n"
+            "5. Output ONLY a single tag in this exact format: [STYLE_BOARD: Exact Item Name 1, Exact Item Name 2]\n"
+            "6. NEVER output conversational text, preambles, or explanations."
         )
         user_style_prompt = f"Occasion/Request: {english_input}\nAvailable Wardrobe: {json.dumps(wardrobe)}"
         
@@ -80,8 +84,20 @@ def text_chat(request: TextChatRequest):
         else:
             style_tag = ""
 
-    # 4. Setup Chat Context (Brain #1)
-    processed_messages = [{"role": msg.role, "content": msg.content} for msg in request.messages[:-1]]
+    # 🚀 4. Setup Chat Context (Brain #1) - WITH HISTORY SCRUBBING FIX 🚀
+    processed_messages = []
+    for msg in request.messages[:-1]:
+        clean_content = msg.content
+        if msg.role == "assistant":
+            # Force the LLM to forget old tags so it has to generate new ones
+            clean_content = re.sub(r'\[STYLE_BOARD:.*?\]', '', clean_content, flags=re.IGNORECASE)
+            clean_content = re.sub(r'\[PACK_LIST:.*?\]', '', clean_content, flags=re.IGNORECASE)
+            clean_content = clean_content.strip()
+            
+        # Only keep the message if it's not empty after cleaning
+        if clean_content:
+            processed_messages.append({"role": msg.role, "content": clean_content})
+
     processed_messages.append({"role": "user", "content": english_input})
     
     with open("system_prompt.txt", "r") as f:
