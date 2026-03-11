@@ -1,3 +1,5 @@
+# main.py
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from celery.result import AsyncResult
@@ -7,17 +9,17 @@ from sentry_sdk.integrations.redis import RedisIntegration
 
 from worker import celery_app
 
-# Import routers
-from routers import chat, audio, stylist, bg_remover, reddit, style_engine, garment_analyzer, packing_engine
+# IMPORT ROUTERS (Removed garment_analyzer, added vision)
+from routers import chat, audio, stylist, bg_remover, reddit, style_engine, packing_engine, vision
 
 # 🚀 INITIALIZE SENTRY FOR FASTAPI
 sentry_sdk.init(
-    dsn="https://048fb4207a04a4a4208a1a97af611e1e@o4511020944392192.ingest.de.sentry.io/4511020965888080", # <--- Replace with your Sentry DSN!
+    dsn="https://048fb4207a04a4a4208a1a97af611e1e@o4511020944392192.ingest.de.sentry.io/4511020965888080", 
     traces_sample_rate=1.0,
     profiles_sample_rate=1.0,
     integrations=[
         FastApiIntegration(),
-        RedisIntegration(), # Tracks if Redis goes down!
+        RedisIntegration(), 
     ],
 )
 
@@ -35,20 +37,19 @@ app.add_middleware(
 # Include all active routers
 app.include_router(chat.router)
 app.include_router(audio.router)
-app.include_router(stylist.router)              # Now powered by Text LLM + Garment Attributes
+app.include_router(stylist.router)              
 app.include_router(bg_remover.router)
 app.include_router(reddit.router)
-app.include_router(style_engine.router)         # Your Outfit Suggestion Engine
-app.include_router(garment_analyzer.router)     # Your CLIP Classification Engine
-app.include_router(packing_engine.router)       # NEW: The deterministic Packing Engine
+app.include_router(style_engine.router)         
+app.include_router(packing_engine.router)       
 
-# DEPRECATED ROUTERS:
-# app.include_router(vision.router) # Removed: No longer using raw vision LLMs for classification
+# 🚀 NEW VISION ROUTER ENABLED
+app.include_router(vision.router) 
+
 
 # 🚀 ENDPOINT: Check the status of a Celery background task
 @app.get("/api/tasks/{job_id}")
 def get_task_status(job_id: str):
-    # Ask Celery/Redis what the status of this specific job is
     task_result = AsyncResult(job_id, app=celery_app)
     
     if task_result.state == 'PENDING':

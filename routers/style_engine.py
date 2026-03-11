@@ -1,136 +1,129 @@
+# routers/style_engine.py
+
 import json
-import re
-import math
-from fastapi import APIRouter, HTTPException
+import random
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Dict, Any
-
-from services import llm_service
+import requests
 
 router = APIRouter()
 
 class StyleRequest(BaseModel):
     occasion: str
-    wardrobe_items: List[Dict[str, Any]]
-    style_preferences: str = ""
+    wardrobe: List[Dict[str, Any]]
 
-# --- 1. THE PYTHON MATH COLOR ENGINE ---
-def hex_to_rgb(hex_color: str):
-    """Converts a hex string like '#6b7381' to an RGB tuple (107, 115, 129)."""
-    hex_color = hex_color.lstrip('#')
-    if len(hex_color) != 6:
-        return (0, 0, 0) # Safe fallback
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+@router.post("/api/generate-outfit")
+def generate_outfit(request: StyleRequest):
+    occasion = request.occasion.lower()
+    wardrobe = request.wardrobe
 
-def color_distance(hex1: str, hex2: str):
-    """Calculates the Euclidean distance between two hex colors. Lower = better match."""
-    if not hex1 or not hex2:
-        return 9999 # Return high distance if color is missing
-    try:
-        r1, g1, b1 = hex_to_rgb(hex1)
-        r2, g2, b2 = hex_to_rgb(hex2)
-        # Standard Euclidean distance formula for 3D color space
-        return math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2)
-    except Exception:
-        return 9999
+    # --- STEP 1: FIND THE MASTERPIECE ---
+    # Look for Dresses or Tops that match the occasion
+    potential_masterpieces = [
+        item for item in wardrobe 
+        if item.get("category") in ["Dresses", "Tops"] 
+        and occasion in [occ.lower() for occ in item.get("occasions", [])]
+    ]
 
-def find_closest_item(target_hex: str, items_list: List[Dict]):
-    """Finds the item in the list whose color is mathematically closest to the target_hex."""
-    if not items_list:
-        return None
+    if not potential_masterpieces:
+        # Fallback: Pick any Top or Dress if no occasion matches
+        potential_masterpieces = [item for item in wardrobe if item.get("category") in ["Dresses", "Tops"]]
     
-    best_item = items_list[0]
-    best_distance = 9999
-    
-    for item in items_list:
-        item_color = item.get("color", "#000000")
-        distance = color_distance(target_hex, item_color)
-        
-        if distance < best_distance:
-            best_distance = distance
-            best_item = item
-            
-    return best_item
+    if not potential_masterpieces:
+        return {"status": "error", "message": "No tops or dresses found in wardrobe to build an outfit."}
 
-# --- 2. THE NEW ENDPOINT ---
-@router.post("/api/generate-style-board")
-def generate_style_board(request: StyleRequest):
-    try:
-        # STEP 1: Categorize the Wardrobe 
-        tops_and_dresses = [i for i in request.wardrobe_items if i.get("category") in ["Tops", "Dresses"]]
-        bottoms = [i for i in request.wardrobe_items if i.get("category") == "Bottoms"]
-        shoes = [i for i in request.wardrobe_items if i.get("category") == "Footwear"]
+    masterpiece = random.choice(potential_masterpieces)
+    is_dress = masterpiece.get("category") == "Dresses"
 
-        if not tops_and_dresses:
-            raise ValueError("No tops or dresses found in wardrobe.")
+    # --- STEP 2: GATHER CANDIDATES ---
+    available_bottoms = [i for i in wardrobe if i.get("category") == "Bottoms" and i != masterpiece]
+    available_shoes = [i for i in wardrobe if i.get("category") == "Footwear" and i != masterpiece]
+    available_accessories = [i for i in wardrobe if i.get("category") == "Accessories" and i != masterpiece]
 
-        # STEP 2: The Strategist LLM (Creative Brain)
-        # Bulletproof Prompt: Force it to act like a data processor, not a conversationalist
-        system_instruction = (
-            "You are a strict data-processing engine. You do not converse. You do not explain. "
-            "Your ONLY job is to output a raw JSON object based on the wardrobe provided.\n"
-            "1. Select the absolute best 'Master Piece' (Top or Dress) ID.\n"
-            "2. Suggest the ideal complementary HEX color for Bottoms.\n"
-            "3. Suggest the ideal HEX color for Footwear.\n\n"
-            "CRITICAL: Output ONLY valid JSON. No markdown blocks, no 'Here is your outfit', NO extra text. "
-            "Required strictly matching keys: 'master_piece_id', 'target_bottom_hex', 'target_shoe_hex'."
-        )
-        
-        user_prompt = (
-            f"Occasion/Vibe: {request.occasion}\n"
-            f"User Tastes: {request.style_preferences}\n\n"
-            f"--- AVAILABLE TOPS & DRESSES ---\n{json.dumps(tops_and_dresses)}"
-        )
-        
-        messages = [{"role": "user", "content": user_prompt}]
-        
-        # EXACT FIX: Pass response_format="json" to lock the LLM into JSON generation mode
-        response_text = llm_service.chat_completion(
-            messages, 
-            system_instruction, 
-            model="llama3.1",
-            response_format="json" 
-        )
-        
-        # Clean and parse the JSON safely
-        clean_json = re.sub(r'```json|```', '', response_text).strip()
-        strategy = json.loads(clean_json)
-        
-        # STEP 3: The Python Math Matcher (Instant execution)
-        final_outfit_ids = []
-        
-        # 3A. Add the Master Piece picked by the LLM
-        final_outfit_ids.append(strategy.get("master_piece_id"))
-        
-        # 3B. Instantly find the closest matching bottom using math
-        target_bottom_color = strategy.get("target_bottom_hex", "#000000")
-        best_bottom = find_closest_item(target_bottom_color, bottoms)
-        if best_bottom:
-            final_outfit_ids.append(best_bottom.get("$id") or best_bottom.get("id"))
-            
-        # 3C. Instantly find the closest matching shoes using math
-        target_shoe_color = strategy.get("target_shoe_hex", "#000000")
-        best_shoe = find_closest_item(target_shoe_color, shoes)
-        if best_shoe:
-            final_outfit_ids.append(best_shoe.get("$id") or best_shoe.get("id"))
+    # --- STEP 3: OLLAMA STYLIST WITH STRICT RULES ---
+    system_prompt = (
+        "You are an expert fashion stylist. I will give you a 'Masterpiece' garment, and lists of available bottoms, shoes, and accessories.\n"
+        "CRITICAL RULES FOR OUTFIT COMPOSITION:\n"
+        f"1. Is the Masterpiece a Dress? {str(is_dress).upper()}\n"
+        "2. IF IT IS A DRESS: You MUST select EXACTLY ONE shoe and EXACTLY ONE accessory (if available). You MUST NOT select a bottom.\n"
+        "3. IF IT IS A TOP: You MUST select EXACTLY ONE bottom, EXACTLY ONE shoe, and EXACTLY ONE accessory (if available).\n"
+        "4. Analyze color and pattern to make the best match.\n"
+        "5. Output ONLY a raw JSON object with keys: 'selected_bottom_name' (null if dress), 'selected_shoe_name', 'selected_accessory_name', and 'styling_reason'.\n"
+        "6. You MUST select exact names from the provided candidate lists."
+    )
 
-        # Clean up any Nones
-        final_outfit_ids = [str(item_id) for item_id in final_outfit_ids if item_id]
-
-        # Return in the exact format your frontend parser expects
-        board_tag = f"[STYLE_BOARD: {', '.join(final_outfit_ids)}]"
-
-        return {
-            "success": True,
-            "board_tag": board_tag,
-            "debug_strategy": strategy
+    user_prompt = json.dumps({
+        "masterpiece": masterpiece,
+        "candidates": {
+            "bottoms": available_bottoms if not is_dress else [],
+            "shoes": available_shoes,
+            "accessories": available_accessories
         }
+    })
+
+    payload = {
+        "model": "llama3.1",
+        "prompt": f"{system_prompt}\n\nDATA:\n{user_prompt}",
+        "stream": False,
+        "format": "json"
+    }
+
+    try:
+        response = requests.post("http://localhost:11434/api/generate", json=payload, timeout=60)
+        response.raise_for_status()
         
-    except Exception as e:
-        print(f"Ahvi Pro Style Engine Error: {str(e)}")
-        # Safe fallback so the app never crashes
-        fallback_ids = [i.get("$id", i.get("id")) for i in request.wardrobe_items[:3]]
+        raw_response = response.json().get("response", "{}")
+        selections = json.loads(raw_response)
+
+        # --- STEP 4: STRICT RULE ENFORCEMENT (PYTHON) ---
+        # 🛡️ If Ollama failed to pick a required item, we FORCE it so the UI rules are met!
+        
+        # Rule 1: If it's a Top, it MUST have a Bottom.
+        if not is_dress and not selections.get("selected_bottom_name") and available_bottoms:
+            selections["selected_bottom_name"] = random.choice(available_bottoms)["name"]
+            
+        # Rule 2: Every outfit MUST have Footwear.
+        if not selections.get("selected_shoe_name") and available_shoes:
+            selections["selected_shoe_name"] = random.choice(available_shoes)["name"]
+
+        # Rule 3: Add accessory if missing but available (Optional, but highly recommended)
+        if not selections.get("selected_accessory_name") and available_accessories:
+            selections["selected_accessory_name"] = random.choice(available_accessories)["name"]
+
+        # --- STEP 5: ASSEMBLE OUTFIT ---
+        final_outfit = [masterpiece]
+        
+        for item in available_bottoms + available_shoes + available_accessories:
+            if item.get("name") in [
+                selections.get("selected_bottom_name"), 
+                selections.get("selected_shoe_name"), 
+                selections.get("selected_accessory_name")
+            ]:
+                final_outfit.append(item)
+
+        item_names = [item.get("name") for item in final_outfit]
+        style_board_tag = f"[STYLE_BOARD: {', '.join(item_names)}]"
+
         return {
-            "success": False,
-            "board_tag": f"[STYLE_BOARD: {', '.join([str(i) for i in fallback_ids if i])}]"
+            "status": "success",
+            "masterpiece": masterpiece.get("name"),
+            "outfit": final_outfit,
+            "styling_reason": selections.get("styling_reason", "A perfectly balanced look based on your wardrobe."),
+            "style_board_tag": style_board_tag
+        }
+
+    except Exception as e:
+        print(f"Style Engine Error: {e}")
+        # Absolute Fallback: Still follow the 1 Top + 1 Bottom + 1 Shoe rule!
+        fallback_outfit = [masterpiece]
+        if available_bottoms and not is_dress: fallback_outfit.append(random.choice(available_bottoms))
+        if available_shoes: fallback_outfit.append(random.choice(available_shoes))
+        if available_accessories: fallback_outfit.append(random.choice(available_accessories))
+        
+        item_names = [item.get("name") for item in fallback_outfit]
+        return {
+            "status": "fallback",
+            "outfit": fallback_outfit,
+            "style_board_tag": f"[STYLE_BOARD: {', '.join(item_names)}]"
         }

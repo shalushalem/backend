@@ -1,5 +1,6 @@
 import json
 import re
+import requests
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Dict, Any
@@ -53,74 +54,98 @@ def text_chat(request: TextChatRequest):
     new_memory_res = llm_service.generate_text(mem_prompt, options={"temperature": 0.0})
     new_memory = new_memory_res if new_memory_res and "none" not in new_memory_res.lower() else user_memory
 
-    # 🚀 3. MULTI-BRAIN ORCHESTRATION: Trigger Style Engine if needed 🚀
-    is_style_req = any(word in english_input.lower() for word in ["style board", "outfit", "wear", "party", "dress", "look", "saree", "suit", "clothes", "shirt", "pant"])
+    # 🚀 3. THE SMART INTENT ROUTER 🚀
+    print("🧠 Routing to Brain #0 (Intent Analyzer)...")
+    
+    router_payload = {
+        "model": "llama3.1",
+        "prompt": f"{prompts.INTENT_ROUTER_PROMPT}\n\nUser Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
+        "stream": False,
+        "format": "json"
+    }
     
     style_tag = ""
-    if is_style_req and wardrobe:
-        print("🧠 Routing to Brain #2 (Style Engine)...")
-        # 💥 UPDATED SMART PROMPT FOR BRAIN 2 (ALLOWS ONE-PIECES) 💥
-        style_sys_prompt = (
-            "You are an expert fashion stylist AI. Your ONLY job is to select a logical, complete outfit from the provided JSON wardrobe based on the occasion.\n"
-            "CRITICAL RULES:\n"
-            "1. You MUST build a COMPLETE outfit. A complete outfit can be:\n"
-            "   - Option A: [Top + Bottom + Footwear]\n"
-            "   - Option B: [One-Piece (Dress/Saree/Suit/Kurta) + Footwear]\n"
-            "2. NEVER suggest an incomplete outfit (e.g., a top without a bottom, unless it is a full-body dress/saree).\n"
-            "3. Do not suggest two bottoms or two tops. Pick exactly what is needed for one person to wear.\n"
-            "4. If the user asks for a traditional item (like a saree) and they do NOT own it, IGNORE their request and build the best alternative full outfit using ONLY items they actually have.\n"
-            "5. Output ONLY a single tag in this exact format: [STYLE_BOARD: Exact Item Name 1, Exact Item Name 2]\n"
-            "6. NEVER output conversational text, preambles, or explanations."
-        )
-        user_style_prompt = f"Occasion/Request: {english_input}\nAvailable Wardrobe: {json.dumps(wardrobe)}"
+    dynamic_chips = []
+    clarifying_msg = ""
+    styling_reason = ""
+    
+    try:
+        router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=30)
         
-        # Ask Brain #2 to pick the clothes
-        style_response = llm_service.chat_completion([{"role": "user", "content": user_style_prompt}], style_sys_prompt)
+        # Clean up markdown if the LLM adds it
+        raw_router = router_res.json().get("response", "{}")
+        clean_router = re.sub(r"```json|```", "", raw_router).strip()
+        router_data = json.loads(clean_router)
         
-        # Extract the tag exactly
-        match = re.search(r'\[STYLE_BOARD:.*?\]', style_response)
-        if match:
-            style_tag = match.group(0)
-        else:
-            style_tag = ""
+        wants_outfit = router_data.get("wants_outfit", False)
+        has_context = router_data.get("has_context", False)
+        
+        if wants_outfit and not has_context:
+            # SCENARIO A: Needs Occasion
+            print("🛑 Missing Context! Asking clarifying questions...")
+            clarifying_msg = router_data.get("clarifying_question", "Where are we heading? Tell me the vibe!")
+            dynamic_chips = router_data.get("chips", ["Casual Hangout", "Night Out", "Office"])
+            
+        elif wants_outfit and has_context and wardrobe:
+            # SCENARIO B: Has Occasion -> Build Outfit
+            occasion = router_data.get("occasion", english_input)
+            print(f"✅ Context clear (Occasion: {occasion}). Triggering Style Engine...")
+            
+            style_payload = {"occasion": occasion, "wardrobe": wardrobe}
+            # Make sure your main.py is running on port 8000 for this loopback to work!
+            style_res = requests.post("http://localhost:8000/api/generate-outfit", json=style_payload)
+            
+            if style_res.status_code == 200:
+                style_data = style_res.json()
+                style_tag = style_data.get("style_board_tag", "")
+                styling_reason = style_data.get("styling_reason", "")
+                
+    except Exception as e:
+        print(f"Intent Router / Style Engine Error: {e}")
 
-    # 🚀 4. Setup Chat Context (Brain #1) - WITH HISTORY SCRUBBING FIX 🚀
+    # 🚀 4. Setup Chat Context (Brain #1) 🚀
     processed_messages = []
     for msg in request.messages[:-1]:
         clean_content = msg.content
         if msg.role == "assistant":
-            # Force the LLM to forget old tags so it has to generate new ones
             clean_content = re.sub(r'\[STYLE_BOARD:.*?\]', '', clean_content, flags=re.IGNORECASE)
             clean_content = re.sub(r'\[PACK_LIST:.*?\]', '', clean_content, flags=re.IGNORECASE)
+            clean_content = re.sub(r'\[CHIPS:.*?\]', '', clean_content, flags=re.IGNORECASE)
             clean_content = clean_content.strip()
             
-        # Only keep the message if it's not empty after cleaning
         if clean_content:
             processed_messages.append({"role": msg.role, "content": clean_content})
 
     processed_messages.append({"role": "user", "content": english_input})
     
-    with open("system_prompt.txt", "r") as f:
+    with open("system_prompt.txt", "r", encoding="utf-8") as f:
         system_instruction = f.read()
     
     system_instruction += (
         "\n\nCRITICAL TONE RULES:\n"
         "1. You are texting a close friend. Keep it SHORT (1-2 sentences maximum). No long paragraphs.\n"
-        "2. NEVER use cheesy AI phrases like 'How can I help you?', 'Let's chat!', or 'Let's get this party started.'\n"
+        "2. NEVER use cheesy AI phrases like 'How can I help you?'.\n"
         "3. Use modern, casual slang naturally (e.g., vibes, tbh, slay, lowkey).\n"
     )
     
     system_instruction += f"\nWHAT YOU KNOW ABOUT THEIR TASTE: {new_memory}\n"
     
-    # 🚀 💥 ANTI-HALLUCINATION PROTOCOL FOR BRAIN 1 💥 🚀
-    if style_tag:
+    # 💥 Dynamic Instructions based on the Router 💥
+    if clarifying_msg:
+        system_instruction += (
+            f"\n\n🚨 URGENT INSTRUCTION 🚨\n"
+            f"The user wants an outfit, but we don't know the occasion.\n"
+            f"You MUST ask this exact question or something very similar: '{clarifying_msg}'\n"
+            f"DO NOT suggest any clothes yet."
+        )
+    elif style_tag:
         system_instruction += (
             f"\n\n🚨 ANTI-HALLUCINATION PROTOCOL 🚨\n"
             f"The Style Engine has selected THIS EXACT outfit: {style_tag}\n"
+            f"The stylist picked this because: {styling_reason}\n"
             "1. You are FORBIDDEN from mentioning any clothing items that are not in this list.\n"
-            "2. NEVER pretend the user is wearing an item they asked for if it is NOT in the STYLE_BOARD list.\n"
-            "3. If the user asked for a specific item (like a 'saree') and it is NOT in the list, you MUST explicitly tell them: 'You don't have a [item] in your wardrobe yet, but I put together this alternative...' and then hype up the outfit that was actually selected.\n"
-            "4. DO NOT output the [STYLE_BOARD] tag yourself."
+            "2. Hype up this specific outfit based on their occasion.\n"
+            "3. DO NOT output the [STYLE_BOARD] tag yourself."
         )
     elif wardrobe:
         system_instruction += f"\n--- USER'S VIRTUAL WARDROBE ---\n{json.dumps(wardrobe)}\n"
@@ -128,9 +153,12 @@ def text_chat(request: TextChatRequest):
     # 5. Generate & Parse Response
     llama_english_response = llm_service.chat_completion(processed_messages, system_instruction)
     
-    # 💥 INJECT THE TAG SO THE PARSER CATCHES IT 💥
+    # Inject tags for the UI Parser
     if style_tag:
         llama_english_response += f"\n{style_tag}"
+    if dynamic_chips:
+        chips_str = ", ".join(dynamic_chips)
+        llama_english_response += f"\n[CHIPS: {chips_str}]"
         
     parsed_data = wardrobe_parser.extract_and_clean_response(llama_english_response, wardrobe)
     llama_english_response = parsed_data["cleaned_text"]
@@ -150,7 +178,7 @@ def text_chat(request: TextChatRequest):
     # 7. Celery Audio Task
     task = run_heavy_audio_task.delay(final_output, target_lang)
 
-    # 🚀 8. EXTRACT IDS FOR THE FRONTEND STYLE BOARD PAGE 🚀
+    # 8. EXTRACT IDS FOR THE FRONTEND STYLE BOARD PAGE
     extracted_board_ids = ""
     if board_tag:
         match = re.search(r'\[STYLE_BOARD:\s*(.*?)\]', board_tag)
