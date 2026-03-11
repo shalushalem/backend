@@ -1,44 +1,48 @@
 import json
 import re
-import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from services import llm_service
 
-# THIS LINE IS CRITICAL - It defines the 'router' that main.py is looking for
 router = APIRouter()
 
-class ImageAnalyzeRequest(BaseModel):
-    image_base64: str
+# Notice we no longer accept base64 images here. We accept the CLIP output.
+class ItemContextRequest(BaseModel):
+    main_category: str
+    sub_category: str
+    color_hex: str
 
-URL_GENERATE = "http://localhost:11434/api/generate"
-
-@router.post("/api/analyze-image")
-def analyze_image(request: ImageAnalyzeRequest):
-    strict_prompt = (
-        "Analyze this clothing item and return a JSON object with keys: 'name', 'category', and 'tags' (as an array of strings). "
-        "CRITICAL: The 'category' field MUST be exactly one of the following options: ['Tops', 'Bottoms', 'Footwear', 'Outerwear', 'Accessories', 'Dresses']. "
-        "Rule: Blazers, jackets, coats, and sweaters must be classified as 'Outerwear', NOT 'Tops'."
+@router.post("/api/item-suggestions")
+def get_item_suggestions(request: ItemContextRequest):
+    system_instruction = (
+        "You are Ahvi's Fashion Knowledge Engine. The user just uploaded a new garment. "
+        "Based on the provided attributes, return a JSON object with: "
+        "1. 'name' (A catchy, descriptive name for the item) "
+        "2. 'tags' (array of 4 style keywords like 'streetwear', 'vintage') "
+        "3. 'pairing_rules' (array of 2 short rules on what to wear this with). "
+        "Output ONLY raw JSON."
     )
     
-    payload = {
-        "model": "llama3.2-vision", 
-        "prompt": strict_prompt,
-        "images": [request.image_base64],
-        "stream": False,
-        "format": "json"
-    }
+    user_prompt = (
+        f"Item: {request.sub_category}\n"
+        f"Category: {request.main_category}\n"
+        f"Color Hex: {request.color_hex}"
+    )
     
     try:
-        response = requests.post(URL_GENERATE, json=payload, timeout=180)
-        response.raise_for_status() 
-        raw_response = response.json().get("response", "{}")
+        messages = [{"role": "user", "content": user_prompt}]
+        # Using the much faster, cheaper text model
+        response_text = llm_service.chat_completion(messages, system_instruction, model="llama3.1")
         
-        # Safe JSON extraction regex
-        clean_response = re.sub(r'```json|```', '', raw_response).strip()
-        
+        # Safe JSON extraction
+        clean_response = re.sub(r'```json|```', '', response_text).strip()
         return json.loads(clean_response)
         
     except Exception as e:
-        print(f"Image Analyze Error: {str(e)}")
-        # Returns a safe default if parsing or the network request fails
-        return {"name": "New Item", "category": "Tops", "tags": []}
+        print(f"Stylist Text Engine Error: {str(e)}")
+        # Safe fallback
+        return {
+            "name": f"{request.sub_category.title()}",
+            "tags": ["versatile", "casual"],
+            "pairing_rules": ["Pair with neutral basics.", "Layer depending on weather."]
+        }

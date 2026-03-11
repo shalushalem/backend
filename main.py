@@ -8,7 +8,7 @@ from sentry_sdk.integrations.redis import RedisIntegration
 from worker import celery_app
 
 # Import routers
-from routers import chat, audio, vision, stylist, bg_remover, reddit, style_engine, garment_analyzer
+from routers import chat, audio, stylist, bg_remover, reddit, style_engine, garment_analyzer, packing_engine
 
 # 🚀 INITIALIZE SENTRY FOR FASTAPI
 sentry_sdk.init(
@@ -32,15 +32,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include all routers
+# Include all active routers
 app.include_router(chat.router)
 app.include_router(audio.router)
-app.include_router(vision.router)
-app.include_router(stylist.router)
+app.include_router(stylist.router)              # Now powered by Text LLM + Garment Attributes
 app.include_router(bg_remover.router)
 app.include_router(reddit.router)
-app.include_router(style_engine.router)
-app.include_router(garment_analyzer.router)
+app.include_router(style_engine.router)         # Your Outfit Suggestion Engine
+app.include_router(garment_analyzer.router)     # Your CLIP Classification Engine
+app.include_router(packing_engine.router)       # NEW: The deterministic Packing Engine
+
+# DEPRECATED ROUTERS:
+# app.include_router(vision.router) # Removed: No longer using raw vision LLMs for classification
 
 # 🚀 ENDPOINT: Check the status of a Celery background task
 @app.get("/api/tasks/{job_id}")
