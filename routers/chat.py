@@ -1,3 +1,5 @@
+# routers/chat.py
+
 import json
 import re
 import requests
@@ -68,11 +70,11 @@ def text_chat(request: TextChatRequest):
     dynamic_chips = []
     clarifying_msg = ""
     styling_reason = ""
+    outfit_names_str = ""
     
     try:
         router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=30)
         
-        # Clean up markdown if the LLM adds it
         raw_router = router_res.json().get("response", "{}")
         clean_router = re.sub(r"```json|```", "", raw_router).strip()
         router_data = json.loads(clean_router)
@@ -81,24 +83,25 @@ def text_chat(request: TextChatRequest):
         has_context = router_data.get("has_context", False)
         
         if wants_outfit and not has_context:
-            # SCENARIO A: Needs Occasion
             print("🛑 Missing Context! Asking clarifying questions...")
             clarifying_msg = router_data.get("clarifying_question", "Where are we heading? Tell me the vibe!")
             dynamic_chips = router_data.get("chips", ["Casual Hangout", "Night Out", "Office"])
             
         elif wants_outfit and has_context and wardrobe:
-            # SCENARIO B: Has Occasion -> Build Outfit
             occasion = router_data.get("occasion", english_input)
             print(f"✅ Context clear (Occasion: {occasion}). Triggering Style Engine...")
             
             style_payload = {"occasion": occasion, "wardrobe": wardrobe}
-            # Make sure your main.py is running on port 8000 for this loopback to work!
             style_res = requests.post("http://localhost:8000/api/generate-outfit", json=style_payload)
             
             if style_res.status_code == 200:
                 style_data = style_res.json()
                 style_tag = style_data.get("style_board_tag", "")
                 styling_reason = style_data.get("styling_reason", "")
+                
+                outfit_items = style_data.get("outfit", [])
+                outfit_names_list = [item.get("name") for item in outfit_items if item.get("name")]
+                outfit_names_str = ", ".join(outfit_names_list)
                 
     except Exception as e:
         print(f"Intent Router / Style Engine Error: {e}")
@@ -130,7 +133,6 @@ def text_chat(request: TextChatRequest):
     
     system_instruction += f"\nWHAT YOU KNOW ABOUT THEIR TASTE: {new_memory}\n"
     
-    # 💥 Dynamic Instructions based on the Router 💥
     if clarifying_msg:
         system_instruction += (
             f"\n\n🚨 URGENT INSTRUCTION 🚨\n"
@@ -141,7 +143,7 @@ def text_chat(request: TextChatRequest):
     elif style_tag:
         system_instruction += (
             f"\n\n🚨 ANTI-HALLUCINATION PROTOCOL 🚨\n"
-            f"The Style Engine has selected THIS EXACT outfit: {style_tag}\n"
+            f"The Style Engine has selected THIS EXACT outfit: {outfit_names_str}\n" 
             f"The stylist picked this because: {styling_reason}\n"
             "1. You are FORBIDDEN from mentioning any clothing items that are not in this list.\n"
             "2. Hype up this specific outfit based on their occasion.\n"
@@ -150,12 +152,13 @@ def text_chat(request: TextChatRequest):
     elif wardrobe:
         system_instruction += f"\n--- USER'S VIRTUAL WARDROBE ---\n{json.dumps(wardrobe)}\n"
 
-    # 5. Generate & Parse Response
+    # 5. Generate Response
     llama_english_response = llm_service.chat_completion(processed_messages, system_instruction)
     
-    # Inject tags for the UI Parser
-    if style_tag:
-        llama_english_response += f"\n{style_tag}"
+    # 🚨 DESTROY HALLUCINATED TAGS: Forcefully delete any fake Style Board tags the LLM tries to make
+    llama_english_response = re.sub(r'\[STYLE_BOARD:.*?\]', '', llama_english_response, flags=re.IGNORECASE).strip()
+    
+    # Inject valid tags for the UI Parser
     if dynamic_chips:
         chips_str = ", ".join(dynamic_chips)
         llama_english_response += f"\n[CHIPS: {chips_str}]"
@@ -164,7 +167,6 @@ def text_chat(request: TextChatRequest):
     llama_english_response = parsed_data["cleaned_text"]
     chips_list = parsed_data["chips"]
     pack_tag = parsed_data["pack_tag"]
-    board_tag = parsed_data["board_tag"]
 
     # 6. Translate Back
     if input_type in ["telugu_script", "hindi_script", "tanglish", "hinglish"]:
@@ -180,8 +182,9 @@ def text_chat(request: TextChatRequest):
 
     # 8. EXTRACT IDS FOR THE FRONTEND STYLE BOARD PAGE
     extracted_board_ids = ""
-    if board_tag:
-        match = re.search(r'\[STYLE_BOARD:\s*(.*?)\]', board_tag)
+    # 🚨 USE THE TRUE STYLE TAG DIRECTLY FROM THE ENGINE
+    if style_tag:
+        match = re.search(r'\[STYLE_BOARD:\s*(.*?)\]', style_tag)
         if match:
             extracted_board_ids = match.group(1).strip()
 

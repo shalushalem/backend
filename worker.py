@@ -1,4 +1,9 @@
+import sys
 import os
+
+# 🚀 FIX: Force Python to add the current directory to its path so it can find 'services'
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from celery import Celery
 import sentry_sdk
 from sentry_sdk.integrations.celery import CeleryIntegration

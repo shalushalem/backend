@@ -2,6 +2,7 @@
 
 import json
 import random
+import re
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Dict, Any
@@ -19,29 +20,28 @@ def generate_outfit(request: StyleRequest):
     wardrobe = request.wardrobe
 
     # --- STEP 1: FIND THE MASTERPIECE ---
-    # Look for Dresses or Tops that match the occasion
     potential_masterpieces = [
         item for item in wardrobe 
-        if item.get("category") in ["Dresses", "Tops"] 
+        if item.get("category", "").title() in ["Dresses", "Tops"] 
         and occasion in [occ.lower() for occ in item.get("occasions", [])]
     ]
 
     if not potential_masterpieces:
         # Fallback: Pick any Top or Dress if no occasion matches
-        potential_masterpieces = [item for item in wardrobe if item.get("category") in ["Dresses", "Tops"]]
+        potential_masterpieces = [item for item in wardrobe if item.get("category", "").title() in ["Dresses", "Tops"]]
     
     if not potential_masterpieces:
         return {"status": "error", "message": "No tops or dresses found in wardrobe to build an outfit."}
 
     masterpiece = random.choice(potential_masterpieces)
-    is_dress = masterpiece.get("category") == "Dresses"
+    is_dress = masterpiece.get("category", "").title() == "Dresses"
 
-    # --- STEP 2: GATHER CANDIDATES ---
-    available_bottoms = [i for i in wardrobe if i.get("category") == "Bottoms" and i != masterpiece]
-    available_shoes = [i for i in wardrobe if i.get("category") == "Footwear" and i != masterpiece]
-    available_accessories = [i for i in wardrobe if i.get("category") == "Accessories" and i != masterpiece]
+    # --- STEP 2: GATHER CANDIDATES (Bulletproof & Case-Insensitive) ---
+    available_bottoms = [i for i in wardrobe if i.get("category", "").lower() in ["bottoms", "bottom"] and i != masterpiece]
+    available_shoes = [i for i in wardrobe if i.get("category", "").lower() in ["footwear", "shoes", "shoe"] and i != masterpiece]
+    available_accessories = [i for i in wardrobe if i.get("category", "").lower() in ["accessories", "accessory", "bags", "bag", "jewelry"] and i != masterpiece]
 
-    # --- STEP 3: OLLAMA STYLIST WITH STRICT RULES ---
+    # --- STEP 3: OLLAMA STYLIST (ID-BASED PROMPT) ---
     system_prompt = (
         "You are an expert fashion stylist. I will give you a 'Masterpiece' garment, and lists of available bottoms, shoes, and accessories.\n"
         "CRITICAL RULES FOR OUTFIT COMPOSITION:\n"
@@ -49,8 +49,8 @@ def generate_outfit(request: StyleRequest):
         "2. IF IT IS A DRESS: You MUST select EXACTLY ONE shoe and EXACTLY ONE accessory (if available). You MUST NOT select a bottom.\n"
         "3. IF IT IS A TOP: You MUST select EXACTLY ONE bottom, EXACTLY ONE shoe, and EXACTLY ONE accessory (if available).\n"
         "4. Analyze color and pattern to make the best match.\n"
-        "5. Output ONLY a raw JSON object with keys: 'selected_bottom_name' (null if dress), 'selected_shoe_name', 'selected_accessory_name', and 'styling_reason'.\n"
-        "6. You MUST select exact names from the provided candidate lists."
+        "5. Output ONLY a raw JSON object with keys: 'selected_bottom_id' (null if dress), 'selected_shoe_id', 'selected_accessory_id', and 'styling_reason'.\n"
+        "6. You MUST select exact IDs from the 'id' field of the provided candidate lists. Do not use names."
     )
 
     user_prompt = json.dumps({
@@ -74,36 +74,47 @@ def generate_outfit(request: StyleRequest):
         response.raise_for_status()
         
         raw_response = response.json().get("response", "{}")
-        selections = json.loads(raw_response)
+        # 🚨 FIX JSON CRASHES: Strip out markdown backticks if Ollama outputs them
+        clean_response = re.sub(r"```json|```", "", raw_response).strip()
+        selections = json.loads(clean_response)
 
-        # --- STEP 4: STRICT RULE ENFORCEMENT (PYTHON) ---
-        # 🛡️ If Ollama failed to pick a required item, we FORCE it so the UI rules are met!
-        
-        # Rule 1: If it's a Top, it MUST have a Bottom.
-        if not is_dress and not selections.get("selected_bottom_name") and available_bottoms:
-            selections["selected_bottom_name"] = random.choice(available_bottoms)["name"]
+        # --- STEP 4: BULLETPROOF STRICT RULE ENFORCEMENT (ID-BASED) ---
+        valid_bottom_ids = [str(item.get("id")) for item in available_bottoms]
+        valid_shoe_ids = [str(item.get("id")) for item in available_shoes]
+        valid_accessory_ids = [str(item.get("id")) for item in available_accessories]
+
+        # Get AI's choices
+        selected_bottom_id = str(selections.get("selected_bottom_id"))
+        selected_shoe_id = str(selections.get("selected_shoe_id"))
+        selected_accessory_id = str(selections.get("selected_accessory_id"))
+
+        if is_dress:
+            # RULE 2: A dress MUST NOT have a bottom.
+            selected_bottom_id = None
+        else:
+            # RULE 1: A top MUST have a bottom. 
+            if (selected_bottom_id not in valid_bottom_ids) and available_bottoms:
+                selected_bottom_id = str(random.choice(available_bottoms).get("id"))
             
-        # Rule 2: Every outfit MUST have Footwear.
-        if not selections.get("selected_shoe_name") and available_shoes:
-            selections["selected_shoe_name"] = random.choice(available_shoes)["name"]
+        # Every outfit MUST have exactly 1 matching Footwear.
+        if (selected_shoe_id not in valid_shoe_ids) and available_shoes:
+            selected_shoe_id = str(random.choice(available_shoes).get("id"))
 
-        # Rule 3: Add accessory if missing but available (Optional, but highly recommended)
-        if not selections.get("selected_accessory_name") and available_accessories:
-            selections["selected_accessory_name"] = random.choice(available_accessories)["name"]
+        # Every outfit gets exactly 1 matching Accessory if available.
+        if (selected_accessory_id not in valid_accessory_ids) and available_accessories:
+            selected_accessory_id = str(random.choice(available_accessories).get("id"))
 
         # --- STEP 5: ASSEMBLE OUTFIT ---
         final_outfit = [masterpiece]
+        target_ids = [selected_bottom_id, selected_shoe_id, selected_accessory_id]
         
         for item in available_bottoms + available_shoes + available_accessories:
-            if item.get("name") in [
-                selections.get("selected_bottom_name"), 
-                selections.get("selected_shoe_name"), 
-                selections.get("selected_accessory_name")
-            ]:
+            if str(item.get("id")) in target_ids:
                 final_outfit.append(item)
 
-        item_names = [item.get("name") for item in final_outfit]
-        style_board_tag = f"[STYLE_BOARD: {', '.join(item_names)}]"
+        # Extract the true Database IDs for the React Native frontend
+        item_ids = [str(item.get("id")) for item in final_outfit if item.get("id")]
+        style_board_tag = f"[STYLE_BOARD: {', '.join(item_ids)}]"
 
         return {
             "status": "success",
@@ -115,15 +126,19 @@ def generate_outfit(request: StyleRequest):
 
     except Exception as e:
         print(f"Style Engine Error: {e}")
-        # Absolute Fallback: Still follow the 1 Top + 1 Bottom + 1 Shoe rule!
+        # Absolute Fallback
         fallback_outfit = [masterpiece]
-        if available_bottoms and not is_dress: fallback_outfit.append(random.choice(available_bottoms))
-        if available_shoes: fallback_outfit.append(random.choice(available_shoes))
-        if available_accessories: fallback_outfit.append(random.choice(available_accessories))
         
-        item_names = [item.get("name") for item in fallback_outfit]
+        if not is_dress and available_bottoms: 
+            fallback_outfit.append(random.choice(available_bottoms))
+        if available_shoes: 
+            fallback_outfit.append(random.choice(available_shoes))
+        if available_accessories: 
+            fallback_outfit.append(random.choice(available_accessories))
+        
+        item_ids = [str(item.get("id")) for item in fallback_outfit if item.get("id")]
         return {
             "status": "fallback",
             "outfit": fallback_outfit,
-            "style_board_tag": f"[STYLE_BOARD: {', '.join(item_names)}]"
+            "style_board_tag": f"[STYLE_BOARD: {', '.join(item_ids)}]"
         }
