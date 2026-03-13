@@ -59,9 +59,12 @@ def text_chat(request: TextChatRequest):
     # 🚀 3. THE SMART INTENT ROUTER 🚀
     print("🧠 Routing to Brain #0 (Intent Analyzer)...")
     
+    # 🔥 FIX: Build context from the last 4 messages so the router REMEMBERS the destination & days!
+    conversation_context = "\n".join([f"{msg.role.upper()}: {msg.content}" for msg in request.messages[-4:]])
+    
     router_payload = {
         "model": "llama3.1",
-        "prompt": f"{prompts.INTENT_ROUTER_PROMPT}\n\nUser Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
+        "prompt": f"{prompts.INTENT_ROUTER_PROMPT}\n\nRecent Conversation Context (Use this to extract missing trip details):\n{conversation_context}\n\nCurrent Target Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
         "stream": False,
         "format": "json"
     }
@@ -71,6 +74,9 @@ def text_chat(request: TextChatRequest):
     clarifying_msg = ""
     styling_reason = ""
     outfit_names_str = ""
+    pack_tag = ""
+    generic_pack_items = []
+    packed_names_str = ""
     
     try:
         router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=30)
@@ -82,29 +88,65 @@ def text_chat(request: TextChatRequest):
         wants_outfit = router_data.get("wants_outfit", False)
         has_context = router_data.get("has_context", False)
         
+        wants_packing = router_data.get("wants_packing", False)
+        has_packing_context = router_data.get("has_packing_context", False)
+        
+        # --- SCENARIO A: WANTS OUTFIT ---
         if wants_outfit and not has_context:
-            print("🛑 Missing Context! Asking clarifying questions...")
+            print("🛑 Missing Outfit Context! Asking clarifying questions...")
             clarifying_msg = router_data.get("clarifying_question", "Where are we heading? Tell me the vibe!")
             dynamic_chips = router_data.get("chips", ["Casual Hangout", "Night Out", "Office"])
             
         elif wants_outfit and has_context and wardrobe:
             occasion = router_data.get("occasion", english_input)
             print(f"✅ Context clear (Occasion: {occasion}). Triggering Style Engine...")
-            
             style_payload = {"occasion": occasion, "wardrobe": wardrobe}
             style_res = requests.post("http://localhost:8000/api/generate-outfit", json=style_payload)
-            
             if style_res.status_code == 200:
                 style_data = style_res.json()
                 style_tag = style_data.get("style_board_tag", "")
                 styling_reason = style_data.get("styling_reason", "")
-                
                 outfit_items = style_data.get("outfit", [])
-                outfit_names_list = [item.get("name") for item in outfit_items if item.get("name")]
-                outfit_names_str = ", ".join(outfit_names_list)
-                
+                outfit_names_str = ", ".join([item.get("name") for item in outfit_items if item.get("name")])
+
+        # --- SCENARIO B: WANTS PACKING LIST ---
+        elif wants_packing and not has_packing_context:
+             print("🛑 Missing Trip Details! Asking for destination/days...")
+             clarifying_msg = router_data.get("clarifying_question", "Ooh a trip! Where are we going and for how many days?")
+             dynamic_chips = ["Weekend trip (2 days)", "1 Week vacation", "Business trip (3 days)"]
+
+        elif wants_packing and has_packing_context and wardrobe:
+             trip_details = router_data.get("trip_details", {})
+             print(f"✅ Trip Details clear ({trip_details}). Triggering Packing Engine...")
+             
+             pack_payload = {
+                 "destination": trip_details.get("destination", "unknown"),
+                 "duration_days": trip_details.get("duration", 3),
+                 "events": trip_details.get("vibe", "general travel"),
+                 "weather": "unknown", 
+                 "wardrobe": wardrobe
+             }
+             
+             pack_res = requests.post("http://localhost:8000/api/generate-packing", json=pack_payload)
+             
+             if pack_res.status_code == 200:
+                 pack_data = pack_res.json()
+                 styling_reason = pack_data.get("reasoning", "")
+                 pack_ids = pack_data.get("pack_list_ids", [])
+                 generic_pack_items = pack_data.get("generic_items", [])
+                 
+                 if pack_ids:
+                     pack_tag = f"[PACK_LIST: {', '.join(pack_ids)}]"
+                     # Extract the actual names of the items from the wardrobe based on the IDs
+                     packed_item_names = []
+                     for item in wardrobe:
+                         item_id = str(item.get("$id", item.get("id", "")))
+                         if item_id in pack_ids:
+                             packed_item_names.append(item.get("name", "A cute item"))
+                     packed_names_str = ", ".join(packed_item_names)
+                 
     except Exception as e:
-        print(f"Intent Router / Style Engine Error: {e}")
+        print(f"Intent Router / Engine Error: {e}")
 
     # 🚀 4. Setup Chat Context (Brain #1) 🚀
     processed_messages = []
@@ -126,7 +168,7 @@ def text_chat(request: TextChatRequest):
     
     system_instruction += (
         "\n\nCRITICAL TONE RULES:\n"
-        "1. You are texting a close friend. Keep it SHORT (1-2 sentences maximum). No long paragraphs.\n"
+        "1. You are texting a close friend. Keep it SHORT.\n"
         "2. NEVER use cheesy AI phrases like 'How can I help you?'.\n"
         "3. Use modern, casual slang naturally (e.g., vibes, tbh, slay, lowkey).\n"
     )
@@ -136,7 +178,6 @@ def text_chat(request: TextChatRequest):
     if clarifying_msg:
         system_instruction += (
             f"\n\n🚨 URGENT INSTRUCTION 🚨\n"
-            f"The user wants an outfit, but we don't know the occasion.\n"
             f"You MUST ask this exact question or something very similar: '{clarifying_msg}'\n"
             f"DO NOT suggest any clothes yet."
         )
@@ -149,16 +190,27 @@ def text_chat(request: TextChatRequest):
             "2. Hype up this specific outfit based on their occasion.\n"
             "3. DO NOT output the [STYLE_BOARD] tag yourself."
         )
+    elif pack_tag:
+        generic_items_str = ", ".join(generic_pack_items)
+        system_instruction += (
+            f"\n\n🚨 ANTI-HALLUCINATION PROTOCOL (PACKING) 🚨\n"
+            f"The Packing Engine has selected THESE SPECIFIC ITEMS from their virtual wardrobe: {packed_names_str}\n"
+            f"Reasoning: {styling_reason}\n"
+            f"1. You MUST excitedly list out the specific wardrobe items you packed for them using a bulleted list.\n"
+            f"2. Also remind them to pack these basics: {generic_items_str}.\n"
+            "3. DO NOT output the [PACK_LIST] tag yourself."
+        )
     elif wardrobe:
         system_instruction += f"\n--- USER'S VIRTUAL WARDROBE ---\n{json.dumps(wardrobe)}\n"
 
     # 5. Generate Response
     llama_english_response = llm_service.chat_completion(processed_messages, system_instruction)
     
-    # 🚨 DESTROY HALLUCINATED TAGS: Forcefully delete any fake Style Board tags the LLM tries to make
+    # 🚨 DESTROY HALLUCINATED TAGS
     llama_english_response = re.sub(r'\[STYLE_BOARD:.*?\]', '', llama_english_response, flags=re.IGNORECASE).strip()
+    llama_english_response = re.sub(r'\[PACK_LIST:.*?\]', '', llama_english_response, flags=re.IGNORECASE).strip()
     
-    # Inject valid tags for the UI Parser
+    # Inject valid chips for the UI Parser
     if dynamic_chips:
         chips_str = ", ".join(dynamic_chips)
         llama_english_response += f"\n[CHIPS: {chips_str}]"
@@ -166,7 +218,6 @@ def text_chat(request: TextChatRequest):
     parsed_data = wardrobe_parser.extract_and_clean_response(llama_english_response, wardrobe)
     llama_english_response = parsed_data["cleaned_text"]
     chips_list = parsed_data["chips"]
-    pack_tag = parsed_data["pack_tag"]
 
     # 6. Translate Back
     if input_type in ["telugu_script", "hindi_script", "tanglish", "hinglish"]:
@@ -182,13 +233,16 @@ def text_chat(request: TextChatRequest):
 
     # 8. EXTRACT IDS FOR THE FRONTEND STYLE BOARD PAGE
     extracted_board_ids = ""
-    # 🚨 USE THE TRUE STYLE TAG DIRECTLY FROM THE ENGINE
     if style_tag:
         match = re.search(r'\[STYLE_BOARD:\s*(.*?)\]', style_tag)
         if match:
             extracted_board_ids = match.group(1).strip()
 
-    if pack_tag: final_output = f"{final_output}\n{pack_tag}"
+    # Append the true packing tag from the engine to the final output
+    if pack_tag: 
+        final_output = f"{final_output}\n{pack_tag}"
+    elif parsed_data["pack_tag"]:
+        final_output = f"{final_output}\n{parsed_data['pack_tag']}"
 
     return {
         "message": {"role": "assistant", "content": final_output},

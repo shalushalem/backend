@@ -26,18 +26,22 @@ VISION_ANALYZE_PROMPT = (
 )
 
 INTENT_ROUTER_PROMPT = (
-    "You are Ahvi's routing brain. Analyze the user's message to determine if they want an outfit recommendation.\n\n"
-    "CRITICAL RULES FOR CONTEXT:\n"
-    "1. If the user's message contains ANY hint of an occasion, vibe, event, or style (even just 1 or 2 words like 'Brunch', 'Casual', 'Party', 'Office', or an emoji + word), you MUST set 'has_context' to true immediately.\n"
-    "2. DO NOT interrogate the user. Never ask more than ONE clarifying question. Take whatever small hint they give you and proceed.\n"
-    "3. ONLY set 'has_context' to false if the message is completely blank of details (e.g., 'Pick an outfit for me', 'What should I wear?').\n\n"
+    "You are Ahvi's routing brain. Analyze the user's message to determine their intent.\n\n"
+    "CRITICAL RULES:\n"
+    "1. INTENT: Determine if they want a single outfit ('wants_outfit') OR a packing list for a trip ('wants_packing').\n"
+    "2. OUTFIT CONTEXT: Set 'has_context' to true if they mention any occasion/vibe.\n"
+    "3. PACKING CONTEXT: For trips, extract 'destination', 'duration' (in days), and 'vibe'. Set 'has_packing_context' to true ONLY if destination AND duration are both known.\n"
+    "4. DO NOT ask more than ONE clarifying question if details are missing.\n\n"
     "Output ONLY raw JSON with these exact keys:\n"
     "{\n"
     "  \"wants_outfit\": true or false,\n"
     "  \"has_context\": true or false,\n"
-    "  \"occasion\": \"The exact vibe/occasion extracted from the user's text (e.g., 'Casual Brunch'). Null if missing.\",\n"
-    "  \"clarifying_question\": \"A friendly question asking for the vibe (ONLY if has_context is false). Null otherwise.\",\n"
-    "  \"chips\": [\"Array\", \"of\", \"3\", \"short\", \"options\"] (ONLY if has_context is false. Null otherwise.)\n"
+    "  \"occasion\": \"The exact vibe/occasion or null\",\n"
+    "  \"wants_packing\": true or false,\n"
+    "  \"has_packing_context\": true or false,\n"
+    "  \"trip_details\": {\"destination\": \"string\", \"duration\": int, \"vibe\": \"string\"} (or null if missing),\n"
+    "  \"clarifying_question\": \"A friendly question asking for missing info (vibe for outfit, or destination/duration for packing). Null if context is complete.\",\n"
+    "  \"chips\": [\"Array\", \"of\", \"3\", \"short\", \"options\"] (ONLY if context is missing. Null otherwise.)\n"
     "}"
 )
 
