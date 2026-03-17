@@ -133,7 +133,7 @@ def text_chat(request: TextChatRequest):
     suggested_counts = ""
     
     try:
-        router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=30)
+        router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=60)
         
         raw_router = router_res.json().get("response", "{}")
         clean_router = re.sub(r"```json|```", "", raw_router).strip()
