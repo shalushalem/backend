@@ -2,12 +2,16 @@ import os
 import io
 import base64
 import torch
+from dotenv import load_dotenv
 from PIL import Image
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from huggingface_hub import snapshot_download, login
 from transformers import AutoModelForImageSegmentation
 from torchvision import transforms
+
+# Load environment variables from the .env file
+load_dotenv()
 
 router = APIRouter()
 
@@ -18,13 +22,13 @@ class BGRemoveRequest(BaseModel):
 # ==========================================
 # 🧠 GLOBAL MODEL SETUP (Runs once on startup)
 # ==========================================
-# ⚠️ SECURITY WARNING: It is highly recommended to use an environment variable 
-# (.env file) for your HuggingFace token instead of hardcoding it!
+
+# Securely fetch the token from your .env file
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
 if hf_token:
     login(token=hf_token)
 else:
-    print("⚠️ Warning: HUGGINGFACE_TOKEN environment variable not found. Downloading the model might fail if it requires authentication.")
+    print("⚠️ Warning: HUGGINGFACE_TOKEN environment variable not found. Check your .env file!")
 
 print("Downloading/Checking RMBG-2.0 model locally...")
 model_path = snapshot_download(
@@ -54,8 +58,7 @@ print("✅ BG Remover Model Loaded & Ready!")
 @router.post("/api/remove-bg")
 def remove_background(request: BGRemoveRequest):
     try:
-        # 1. Decode the Base64 string from the frontend into a PIL Image
-        # (Strip the "data:image/jpeg;base64," prefix if it exists)
+        # 1. Decode Base64 string from the frontend
         base64_data = request.image_base64
         if "," in base64_data:
             base64_data = base64_data.split(",")[1]
@@ -73,8 +76,9 @@ def remove_background(request: BGRemoveRequest):
             mask = preds[0].squeeze()
 
         # 3. Convert mask to image and resize back to original quality
-        # Using Image.Resampling.LANCZOS to avoid deprecation warnings in newer Pillow versions
-        mask_pil = transforms.ToPILImage()(mask).resize((w, h), getattr(Image, 'LANCZOS', Image.Resampling.LANCZOS))
+        # Safely fetches LANCZOS regardless of Pillow version
+        resample_method = getattr(Image, 'LANCZOS', getattr(Image.Resampling, 'LANCZOS', 1))
+        mask_pil = transforms.ToPILImage()(mask).resize((w, h), resample_method)
 
         # 4. Apply mask to create the transparent PNG
         final_image = orig_image.copy()
