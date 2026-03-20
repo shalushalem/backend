@@ -1,8 +1,9 @@
-# routers/chat.py
+# backend/routers/chat.py
 
 import json
 import re
 import requests
+import random
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Dict, Any
@@ -13,6 +14,10 @@ from utils import wardrobe_parser
 import prompts
 from worker import run_heavy_audio_task
 
+# 🧠 IMPORT THE NEW FAST PYTHON BRAIN
+from brain.nlu.intent_router import nlu_router
+from brain.engines.style_builder import style_engine
+
 router = APIRouter()
 
 # 🚀 OPEN-METEO WEATHER INTEGRATION
@@ -20,7 +25,6 @@ def get_weather_forecast(destination: str, days: int) -> str:
     if not destination or destination.lower() == "unknown":
         return "unknown"
     try:
-        # 1. Geocode the destination name to get Latitude and Longitude
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={destination}&count=1&language=en&format=json"
         geo_res = requests.get(geo_url, timeout=5)
         geo_data = geo_res.json()
@@ -31,7 +35,6 @@ def get_weather_forecast(destination: str, days: int) -> str:
         lat = geo_data["results"][0]["latitude"]
         lon = geo_data["results"][0]["longitude"]
         
-        # 2. Fetch the weather (Open-Meteo maxes out at 16 days for free tier)
         forecast_days = min(days, 16)
         if forecast_days < 1: forecast_days = 1
         
@@ -47,7 +50,6 @@ def get_weather_forecast(destination: str, days: int) -> str:
         min_temps = daily.get("temperature_2m_min", [])
         precip = daily.get("precipitation_sum", [])
         
-        # Calculate averages for the trip
         avg_max = sum(max_temps) / len(max_temps) if max_temps else 0
         avg_min = sum(min_temps) / len(min_temps) if min_temps else 0
         total_precip = sum(precip) if precip else 0
@@ -109,18 +111,17 @@ def text_chat(request: TextChatRequest):
     new_memory_res = llm_service.generate_text(mem_prompt, options={"temperature": 0.0})
     new_memory = new_memory_res if new_memory_res and "none" not in new_memory_res.lower() else user_memory
 
-    # 🚀 3. THE SMART INTENT ROUTER 🚀
-    print("🧠 Routing to Brain #0 (Intent Analyzer)...")
+    # 🚀 3. HYBRID INTENT ROUTER (Fast Python + LLM Fallback) 🚀
+    print("🧠 Routing to Brain #0 (Hybrid Intent Analyzer)...")
     
-    conversation_context = "\n".join([f"{msg.role.upper()}: {msg.content}" for msg in request.messages[-4:]])
+    # Run the fast, local NLU first!
+    intent_data = nlu_router.classify_intent(english_input)
+    occasion_slot = intent_data["slots"]["occasion"]
     
-    # 🚀 COMBINED RULES: Anti-Looping, Smart Durations, and Weather Verification!
-    router_payload = {
-        "model": "llama3.1",
-        "prompt": f"{prompts.INTENT_ROUTER_PROMPT}\n\n🚨 CRITICAL ROUTER RULES:\n1. INTENT MEMORY: If the user is talking about a vacation/trip/packing in the context, STAY IN PACKING MODE (wants_packing=true, wants_outfit=false). Do not ask about 'style vibe'.\n2. WEATHER COMPATIBILITY: If they want a packing list, the 'destination' MUST be a real geographic city or country. If they give a generic location like 'grandma's house' or 'the beach', set has_packing_context to False and ask 'What city is that in?'.\n3. DESTINATIONS: 'Goa', 'Bali', etc. are perfectly valid. Do NOT ask 'What city is that in?' for real places.\n4. DURATION: If they give a valid destination but no duration, silently default to 3 days. Do not ask for the duration.\n\nRecent Conversation Context:\n{conversation_context}\n\nCurrent Target Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
-        "stream": False,
-        "format": "json"
-    }
+    wants_outfit = False
+    has_context = False
+    wants_packing = False
+    has_packing_context = False
     
     style_tag = ""
     dynamic_chips = []
@@ -131,115 +132,130 @@ def text_chat(request: TextChatRequest):
     generic_pack_items = []
     packed_names_str = ""
     suggested_counts = ""
+    router_data = {}
     
-    try:
-        router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=60)
+    conversation_text = "\n".join([f"{msg.role.upper()}: {msg.content}" for msg in request.messages[-4:]]).lower() + " " + english_input.lower()
+    
+    # --- ROUTING LOGIC ---
+    if occasion_slot == "vacation" or any(w in conversation_text for w in ["pack", "trip", "vacation", "suitcase", "flight"]):
+        # It's a packing request. We need the heavy LLM to extract city and duration.
+        wants_packing = True
+        print("🌍 Vacation detected. Using LLM for trip extraction...")
         
-        raw_router = router_res.json().get("response", "{}")
-        clean_router = re.sub(r"```json|```", "", raw_router).strip()
-        router_data = json.loads(clean_router)
-        
-        wants_outfit = router_data.get("wants_outfit", False)
-        has_context = router_data.get("has_context", False)
-        
-        wants_packing = router_data.get("wants_packing", False)
-        has_packing_context = router_data.get("has_packing_context", False)
+        router_payload = {
+            "model": "llama3.1",
+            "prompt": f"{prompts.INTENT_ROUTER_PROMPT}\n\n🚨 CRITICAL ROUTER RULES:\n1. INTENT MEMORY: If the user is talking about a vacation/trip/packing in the context, STAY IN PACKING MODE (wants_packing=true, wants_outfit=false). Do not ask about 'style vibe'.\n2. WEATHER COMPATIBILITY: If they want a packing list, the 'destination' MUST be a real geographic city or country. If they give a generic location like 'grandma's house' or 'the beach', set has_packing_context to False and ask 'What city is that in?'.\n3. DESTINATIONS: 'Goa', 'Bali', etc. are perfectly valid. Do NOT ask 'What city is that in?' for real places.\n4. DURATION: If they give a valid destination but no duration, silently default to 3 days. Do not ask for the duration.\n\nRecent Conversation Context:\n{conversation_text}\n\nCurrent Target Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
+            "stream": False,
+            "format": "json"
+        }
+        try:
+            router_res = requests.post("http://localhost:11434/api/generate", json=router_payload, timeout=60)
+            raw_router = router_res.json().get("response", "{}")
+            clean_router = re.sub(r"```json|```", "", raw_router).strip()
+            router_data = json.loads(clean_router)
+            has_packing_context = router_data.get("has_packing_context", False)
+        except Exception as e:
+            print(f"Router extraction failed: {e}")
 
-        # 🚀 THE SMART FAIL-SAFE: Protects Style Engine vs Packing Engine
-        conversation_text = conversation_context.lower() + " " + english_input.lower()
+    elif intent_data["status"] == "success" and occasion_slot:
+        # FAST PATH: Outfit Builder! No LLM routing needed!
+        print(f"⚡ FAST PATH: Detected styling intent '{occasion_slot}'. Bypassing LLM Router!")
+        wants_outfit = True
+        has_context = True
         
-        # 1. If they explicitly ask for an outfit/what to wear, PROTECT THE STYLE ENGINE!
-        if "outfit" in english_input.lower() or "wear" in english_input.lower() or "style" in english_input.lower():
-            wants_outfit = True
-            wants_packing = False
-            
-        # 2. Otherwise, if they mention packing/trips, trigger the Packing Engine
-        elif "pack" in conversation_text or "trip" in conversation_text or "vacation" in conversation_text or "suitcase" in conversation_text:
-            wants_packing = True
-            wants_outfit = False
-        
-        # --- SCENARIO B: WANTS PACKING LIST (MOVED TO TOP FOR PRIORITY) ---
-        if wants_packing and not has_packing_context:
-             print("🛑 Missing Trip Details! Asking for destination/days...")
-             clarifying_msg = router_data.get("clarifying_question", "Ooh a trip! ✈️ What city are we heading to?")
-             dynamic_chips = ["Goa", "Mumbai", "London"]
+    elif "outfit" in english_input.lower() or "wear" in english_input.lower() or "style" in english_input.lower():
+        # Wants an outfit but no occasion detected
+        wants_outfit = True
+        has_context = False
 
-        elif wants_packing and has_packing_context:
-             if not wardrobe:
-                 print("🛑 User wants a packing list, but their virtual wardrobe is empty!")
-                 clarifying_msg = "I'd love to pack your bags, but your virtual wardrobe is empty! 😭 Upload some clothes first so I know what we're working with."
+
+    # --- SCENARIO B: WANTS PACKING LIST ---
+    if wants_packing and not has_packing_context:
+         print("🛑 Missing Trip Details! Asking for destination/days...")
+         clarifying_msg = router_data.get("clarifying_question", "Ooh a trip! ✈️ What city are we heading to?")
+         dynamic_chips = ["Goa", "Mumbai", "London"]
+
+    elif wants_packing and has_packing_context:
+         if not wardrobe:
+             clarifying_msg = "I'd love to pack your bags, but your virtual wardrobe is empty! 😭 Upload some clothes first so I know what we're working with."
+         else:
+             trip_details = router_data.get("trip_details", {})
+             raw_duration = trip_details.get("duration")
+             if not raw_duration: safe_duration = 3
+             elif isinstance(raw_duration, str):
+                 match = re.search(r'\d+', raw_duration)
+                 safe_duration = int(match.group()) if match else 3
              else:
-                 trip_details = router_data.get("trip_details", {})
-                 print(f"✅ Trip Details clear ({trip_details}). Triggering Packing Engine...")
-                 
-                 # Safely parse duration, default to 3 if missing
-                 raw_duration = trip_details.get("duration")
-                 if not raw_duration:
-                     safe_duration = 3
-                 elif isinstance(raw_duration, str):
-                     match = re.search(r'\d+', raw_duration)
-                     safe_duration = int(match.group()) if match else 3
-                 else:
-                     try: safe_duration = int(raw_duration)
-                     except: safe_duration = 3
+                 try: safe_duration = int(raw_duration)
+                 except: safe_duration = 3
 
-                 dest = trip_details.get("destination") or "unknown"
-                 
-                 # 🚀 FETCH REAL WEATHER 🚀
-                 print(f"🌍 Geocoding and fetching weather for {dest}...")
-                 real_weather = get_weather_forecast(dest, safe_duration)
+             dest = trip_details.get("destination") or "unknown"
+             real_weather = get_weather_forecast(dest, safe_duration)
 
-                 pack_payload = {
-                     "destination": dest,
-                     "duration_days": safe_duration,
-                     "events": trip_details.get("vibe") or "general travel", 
-                     "weather": real_weather, 
-                     "wardrobe": wardrobe
-                 }
+             pack_payload = {
+                 "destination": dest,
+                 "duration_days": safe_duration,
+                 "events": trip_details.get("vibe") or "general travel", 
+                 "weather": real_weather, 
+                 "wardrobe": wardrobe
+             }
+             
+             pack_res = requests.post("http://localhost:8000/api/generate-packing", json=pack_payload)
+             if pack_res.status_code == 200:
+                 pack_data = pack_res.json()
+                 styling_reason = pack_data.get("reasoning", "")
+                 suggested_counts = pack_data.get("suggested_counts", "") 
+                 pack_ids = pack_data.get("pack_list_ids", [])
+                 generic_pack_items = pack_data.get("generic_items", [])
                  
-                 print(f"🚀 Sending payload to Packing Engine: {pack_payload}")
-                 pack_res = requests.post("http://localhost:8000/api/generate-packing", json=pack_payload)
-                 
-                 if pack_res.status_code == 200:
-                     print("✅ Packing Engine API Success!")
-                     pack_data = pack_res.json()
-                     styling_reason = pack_data.get("reasoning", "")
-                     suggested_counts = pack_data.get("suggested_counts", "") 
-                     pack_ids = pack_data.get("pack_list_ids", [])
-                     generic_pack_items = pack_data.get("generic_items", [])
-                     
-                     if pack_ids:
-                         pack_tag = f"[PACK_LIST: {', '.join(pack_ids)}]"
-                         packed_item_names = []
-                         for item in wardrobe:
-                             item_id = str(item.get("$id", item.get("id", "")))
-                             if item_id in pack_ids:
-                                 packed_item_names.append(item.get("name", "A cute item"))
-                         packed_names_str = ", ".join(packed_item_names)
-                 else:
-                     print(f"❌ Packing Engine API Failed! Status: {pack_res.status_code}")
-                     print(f"❌ Error Details: {pack_res.text}")
+                 if pack_ids:
+                     pack_tag = f"[PACK_LIST: {', '.join(pack_ids)}]"
+                     packed_item_names = []
+                     for item in wardrobe:
+                         item_id = str(item.get("$id", item.get("id", "")))
+                         if item_id in pack_ids:
+                             packed_item_names.append(item.get("name", "A cute item"))
+                     packed_names_str = ", ".join(packed_item_names)
 
-        # --- SCENARIO A: WANTS OUTFIT ---
-        elif wants_outfit and not has_context:
-            print("🛑 Missing Outfit Context! Asking clarifying questions...")
-            clarifying_msg = router_data.get("clarifying_question", "Where are we heading? Tell me the vibe!")
-            dynamic_chips = router_data.get("chips", ["Casual Hangout", "Night Out", "Office"])
+
+    # --- SCENARIO A: WANTS OUTFIT (POWERED BY FAST STYLE ENGINE) ---
+    elif wants_outfit and not has_context:
+        print("🛑 Missing Outfit Context! Asking clarifying questions...")
+        clarifying_msg = "Where are we heading? Tell me the vibe!"
+        dynamic_chips = ["Office", "Party", "Casual"]
+        
+    elif wants_outfit and has_context and wardrobe:
+        print(f"✅ Fast Context clear (Occasion: {occasion_slot}). Triggering Local Style Engine...")
+        
+        # ⚡ Run local JSON rule engine
+        outfit_data = style_engine.build_outfit(intent_data)
+        
+        # ⚡ Automatically map generic rules to ACTUAL Wardrobe IDs
+        matched_ids = []
+        matched_names = []
+        
+        for item in wardrobe:
+            item_cat = str(item.get("category", "")).lower()
+            item_sub = str(item.get("subcategory", "")).lower()
+            item_id = str(item.get("$id", item.get("id", "")))
             
-        elif wants_outfit and has_context and wardrobe:
-            occasion = router_data.get("occasion", english_input)
-            print(f"✅ Context clear (Occasion: {occasion}). Triggering Style Engine...")
-            style_payload = {"occasion": occasion, "wardrobe": wardrobe}
-            style_res = requests.post("http://localhost:8000/api/generate-outfit", json=style_payload)
-            if style_res.status_code == 200:
-                style_data = style_res.json()
-                style_tag = style_data.get("style_board_tag", "")
-                styling_reason = style_data.get("styling_reason", "")
-                outfit_items = style_data.get("outfit", [])
-                outfit_names_str = ", ".join([item.get("name") for item in outfit_items if item.get("name")])
+            if "top" in item_cat or "shirt" in item_sub:
+                if len([i for i in matched_names if "top" in i.lower() or "shirt" in i.lower()]) == 0:
+                    matched_ids.append(item_id)
+                    matched_names.append(item.get("name", "Top"))
+            elif "bottom" in item_cat or "pant" in item_sub or "jeans" in item_sub:
+                if len([i for i in matched_names if "pant" in i.lower() or "jeans" in i.lower()]) == 0:
+                    matched_ids.append(item_id)
+                    matched_names.append(item.get("name", "Bottom"))
+                    
+        if matched_ids:
+            # Generate the EXACT format your Flutter Appwrite UI needs
+            style_tag = f"[STYLE_BOARD: {', '.join(matched_ids)}]"
+            styling_reason = outfit_data.get("context", "A perfect match for your occasion!")
+            outfit_names_str = ", ".join(matched_names)
+        else:
+            clarifying_msg = "I know the perfect outfit formula, but I couldn't find matching items in your virtual closet! Upload some tops and bottoms."
 
-    except Exception as e:
-        print(f"Intent Router / Engine Error: {e}")
 
     # 🚀 4. Setup Chat Context (Brain #1) 🚀
     processed_messages = []
