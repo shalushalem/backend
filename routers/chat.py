@@ -272,8 +272,7 @@ def text_chat(request: TextChatRequest):
 
     processed_messages.append({"role": "user", "content": english_input})
     
-    with open("system_prompt.txt", "r", encoding="utf-8") as f:
-        system_instruction = f.read()
+    system_instruction = prompts.AHVI_MASTER_PROMPT
     
     system_instruction += (
         "\n\nCRITICAL TONE RULES:\n"
