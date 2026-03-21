@@ -11,6 +11,9 @@ def generate_text(prompt: str, options: dict = None) -> str:
     Generates a single text completion. 
     Used by translation.py and memory updates.
     """
+    if not prompt:
+        return "none"
+
     payload = {
         "model": DEFAULT_MODEL,
         "prompt": prompt,
@@ -22,17 +25,27 @@ def generate_text(prompt: str, options: dict = None) -> str:
 
     try:
         response = requests.post(f"{OLLAMA_URL}/generate", json=payload, timeout=60)
+        
+        # 🚨 FIX: Print the ACTUAL error message from Ollama before crashing
+        if response.status_code != 200:
+            print(f"\n🔥 OLLAMA ERROR DETAILS (generate_text):")
+            print(f"Status: {response.status_code}")
+            print(f"Message: {response.text}\n")
+            
         response.raise_for_status()
         return response.json().get("response", "").strip()
     except Exception as e:
-        print(f"❌ LLM Error (generate_text): {e}")
-        return ""
+        print(f"❌ LLM Request Failed (generate_text): {e}")
+        return "none" # Returning 'none' prevents the chat.py memory from being wiped
 
 def chat_completion(messages: list, system_instruction: str = "") -> str:
     """
     Handles multi-turn chat completions.
     Used by the main text_chat endpoint in chat.py.
     """
+    if not messages:
+        return "I didn't catch that!"
+
     formatted_messages = []
     
     # Inject the system instructions (Personality, Rules, Memory)
@@ -50,10 +63,17 @@ def chat_completion(messages: list, system_instruction: str = "") -> str:
 
     try:
         response = requests.post(f"{OLLAMA_URL}/chat", json=payload, timeout=60)
+        
+        # 🚨 FIX: Print the ACTUAL error message from Ollama before crashing
+        if response.status_code != 200:
+            print(f"\n🔥 OLLAMA ERROR DETAILS (chat_completion):")
+            print(f"Status: {response.status_code}")
+            print(f"Message: {response.text}\n")
+
         response.raise_for_status()
         return response.json().get("message", {}).get("content", "").strip()
     except Exception as e:
-        print(f"❌ LLM Error (chat_completion): {e}")
+        print(f"❌ LLM Request Failed (chat_completion): {e}")
         return "Oops, my style brain glitched for a second! Can you repeat that?"
 
 def format_wardrobe_for_llm(items):

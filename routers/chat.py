@@ -118,7 +118,8 @@ def text_chat(request: TextChatRequest):
 
     # 2. Update Memory
     mem_prompt = UPDATE_MEMORY_PROMPT.format(new_user_text=english_input, current_memory=user_memory)
-    new_memory_res = llm_service.generate_text(mem_prompt, options={"temperature": 0.0})
+    # FIX 1: Changed temperature from 0.0 to 0.1 to prevent Ollama NaN math crashes
+    new_memory_res = llm_service.generate_text(mem_prompt, options={"temperature": 0.1})
     new_memory = new_memory_res if new_memory_res and "none" not in new_memory_res.lower() else user_memory
 
     # 🚀 3. HYBRID INTENT ROUTER (Fast Python + LLM Fallback) 🚀
@@ -267,17 +268,24 @@ def text_chat(request: TextChatRequest):
     # 🚀 4. Setup Chat Context & History 🚀
     processed_messages = []
     
-    # Extract previous history properly
+    # FIX 2: Strict role normalization to prevent Ollama Chat API crashes
     for msg in request.messages[:-1]:
         clean_content = msg.content
-        if msg.role == "assistant":
+        
+        # Normalize the role (map anything that isn't user/system to 'assistant')
+        safe_role = msg.role.lower()
+        if safe_role not in ["user", "assistant", "system"]:
+            safe_role = "assistant"
+
+        if safe_role == "assistant":
+            # Clean up hidden backend tags before feeding back to the LLM
             clean_content = re.sub(r'\[STYLE_BOARD:.*?\]', '', clean_content, flags=re.IGNORECASE)
             clean_content = re.sub(r'\[PACK_LIST:.*?\]', '', clean_content, flags=re.IGNORECASE)
             clean_content = re.sub(r'\[CHIPS:.*?\]', '', clean_content, flags=re.IGNORECASE)
             clean_content = clean_content.strip()
             
         if clean_content:
-            processed_messages.append({"role": msg.role, "content": clean_content})
+            processed_messages.append({"role": safe_role, "content": clean_content})
 
     processed_messages.append({"role": "user", "content": english_input})
     
