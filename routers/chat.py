@@ -11,12 +11,20 @@ from deep_translator import GoogleTranslator
 
 from services import translation, llm_service
 from utils import wardrobe_parser
-import prompts
 from worker import run_heavy_audio_task
 
 # 🧠 IMPORT THE NEW FAST PYTHON BRAIN
 from brain.nlu.intent_router import nlu_router
 from brain.engines.style_builder import style_engine
+from brain.context.context_engine import context_engine
+from brain.personalization.style_dna_engine import style_dna_engine
+
+# 🚀 NEW MODULAR PROMPT IMPORTS
+from prompts.core_prompts import AHVI_SYSTEM_PROMPT
+from prompts.personality_prompts import PERSONALITY_LAYER
+from prompts.styling_prompts import STYLE_EXPLANATION_PROMPT
+from prompts.memory_prompts import UPDATE_MEMORY_PROMPT
+from prompts.router_prompts import INTENT_ROUTER_PROMPT
 
 router = APIRouter()
 
@@ -107,7 +115,7 @@ def text_chat(request: TextChatRequest):
         else: english_input = raw_user_input 
 
     # 2. Update Memory
-    mem_prompt = prompts.UPDATE_MEMORY_PROMPT.format(new_user_text=english_input, current_memory=user_memory)
+    mem_prompt = UPDATE_MEMORY_PROMPT.format(new_user_text=english_input, current_memory=user_memory)
     new_memory_res = llm_service.generate_text(mem_prompt, options={"temperature": 0.0})
     new_memory = new_memory_res if new_memory_res and "none" not in new_memory_res.lower() else user_memory
 
@@ -138,13 +146,12 @@ def text_chat(request: TextChatRequest):
     
     # --- ROUTING LOGIC ---
     if occasion_slot == "vacation" or any(w in conversation_text for w in ["pack", "trip", "vacation", "suitcase", "flight"]):
-        # It's a packing request. We need the heavy LLM to extract city and duration.
         wants_packing = True
         print("🌍 Vacation detected. Using LLM for trip extraction...")
         
         router_payload = {
             "model": "llama3.1",
-            "prompt": f"{prompts.INTENT_ROUTER_PROMPT}\n\n🚨 CRITICAL ROUTER RULES:\n1. INTENT MEMORY: If the user is talking about a vacation/trip/packing in the context, STAY IN PACKING MODE (wants_packing=true, wants_outfit=false). Do not ask about 'style vibe'.\n2. WEATHER COMPATIBILITY: If they want a packing list, the 'destination' MUST be a real geographic city or country. If they give a generic location like 'grandma's house' or 'the beach', set has_packing_context to False and ask 'What city is that in?'.\n3. DESTINATIONS: 'Goa', 'Bali', etc. are perfectly valid. Do NOT ask 'What city is that in?' for real places.\n4. DURATION: If they give a valid destination but no duration, silently default to 3 days. Do not ask for the duration.\n\nRecent Conversation Context:\n{conversation_text}\n\nCurrent Target Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
+            "prompt": f"{INTENT_ROUTER_PROMPT}\n\n🚨 CRITICAL ROUTER RULES:\n1. INTENT MEMORY: If the user is talking about a vacation/trip/packing in the context, STAY IN PACKING MODE (wants_packing=true, wants_outfit=false). Do not ask about 'style vibe'.\n2. WEATHER COMPATIBILITY: If they want a packing list, the 'destination' MUST be a real geographic city or country. If they give a generic location like 'grandma's house' or 'the beach', set has_packing_context to False and ask 'What city is that in?'.\n3. DESTINATIONS: 'Goa', 'Bali', etc. are perfectly valid. Do NOT ask 'What city is that in?' for real places.\n4. DURATION: If they give a valid destination but no duration, silently default to 3 days. Do not ask for the duration.\n\nRecent Conversation Context:\n{conversation_text}\n\nCurrent Target Message: '{english_input}'\nWardrobe Size: {len(wardrobe)} items.",
             "stream": False,
             "format": "json"
         }
@@ -158,13 +165,11 @@ def text_chat(request: TextChatRequest):
             print(f"Router extraction failed: {e}")
 
     elif intent_data["status"] == "success" and occasion_slot:
-        # FAST PATH: Outfit Builder! No LLM routing needed!
         print(f"⚡ FAST PATH: Detected styling intent '{occasion_slot}'. Bypassing LLM Router!")
         wants_outfit = True
         has_context = True
         
     elif "outfit" in english_input.lower() or "wear" in english_input.lower() or "style" in english_input.lower():
-        # Wants an outfit but no occasion detected
         wants_outfit = True
         has_context = False
 
@@ -218,43 +223,66 @@ def text_chat(request: TextChatRequest):
                      packed_names_str = ", ".join(packed_item_names)
 
 
-    # --- SCENARIO A: WANTS OUTFIT (POWERED BY FAST STYLE ENGINE) ---
+    # --- SCENARIO A: WANTS OUTFIT (POWERED BY FULL INTELLIGENCE PIPELINE) ---
     elif wants_outfit and not has_context:
         print("🛑 Missing Outfit Context! Asking clarifying questions...")
         clarifying_msg = "Where are we heading? Tell me the vibe!"
         dynamic_chips = ["Office", "Party", "Casual"]
         
     elif wants_outfit and has_context and wardrobe:
-        print(f"✅ Fast Context clear (Occasion: {occasion_slot}). Triggering Local Style Engine...")
-        
-        # ⚡ Run local JSON rule engine
-        outfit_data = style_engine.build_outfit(intent_data)
-        
-        # ⚡ Automatically map generic rules to ACTUAL Wardrobe IDs
+        print(f"✅ Context clear (Occasion: {occasion_slot}). Running full intelligence pipeline...")
+
+        # 🧠 1. Build clean context (NEW FLOW)
+        context = context_engine.build_context(
+            user_id="temp_user",  # TODO: replace with real user_id
+            intent_data=intent_data,
+            wardrobe=wardrobe,
+            user_profile=request.user_profile,
+            history=[],  # TODO: plug DB later
+            vision={}    # TODO: plug CLIP later
+        )
+
+        # 🧬 2. Apply Style DNA
+        context = style_dna_engine.enrich_context(context)
+
+        # 🎯 3. Generate outfit
+        outfit_data = style_engine.build_outfit(context)
+
+        # 🔗 4. Map output → wardrobe items
+        outfits = outfit_data.get("outfits", [])
+        best = outfits[0] if outfits else {}
+
+        target_items = [
+            best.get("top"),
+            best.get("bottom"),
+            best.get("shoes")
+        ]
+
         matched_ids = []
         matched_names = []
-        
+
+        # We check the actual names generated by the engine against the wardrobe
         for item in wardrobe:
-            item_cat = str(item.get("category", "")).lower()
-            item_sub = str(item.get("subcategory", "")).lower()
+            item_name = item.get("name", "")
             item_id = str(item.get("$id", item.get("id", "")))
-            
-            if "top" in item_cat or "shirt" in item_sub:
-                if len([i for i in matched_names if "top" in i.lower() or "shirt" in i.lower()]) == 0:
-                    matched_ids.append(item_id)
-                    matched_names.append(item.get("name", "Top"))
-            elif "bottom" in item_cat or "pant" in item_sub or "jeans" in item_sub:
-                if len([i for i in matched_names if "pant" in i.lower() or "jeans" in i.lower()]) == 0:
-                    matched_ids.append(item_id)
-                    matched_names.append(item.get("name", "Bottom"))
-                    
+
+            if best.get("top") == item_name:
+                matched_ids.append(item_id)
+                matched_names.append(item_name)
+            elif best.get("bottom") == item_name:
+                matched_ids.append(item_id)
+                matched_names.append(item_name)
+            elif best.get("shoes") == item_name:
+                matched_ids.append(item_id)
+                matched_names.append(item_name)
+
         if matched_ids:
             # Generate the EXACT format your Flutter Appwrite UI needs
             style_tag = f"[STYLE_BOARD: {', '.join(matched_ids)}]"
-            styling_reason = outfit_data.get("context", "A perfect match for your occasion!")
+            styling_reason = outfit_data.get("context", "Styled for your vibe")
             outfit_names_str = ", ".join(matched_names)
         else:
-            clarifying_msg = "I know the perfect outfit formula, but I couldn't find matching items in your virtual closet! Upload some tops and bottoms."
+            clarifying_msg = "I know the perfect outfit formula, but I couldn't find enough matching items in your virtual closet! Upload some more tops, bottoms, and shoes."
 
 
     # 🚀 4. Setup Chat Context (Brain #1) 🚀
@@ -272,14 +300,8 @@ def text_chat(request: TextChatRequest):
 
     processed_messages.append({"role": "user", "content": english_input})
     
-    system_instruction = prompts.AHVI_MASTER_PROMPT
-    
-    system_instruction += (
-        "\n\nCRITICAL TONE RULES:\n"
-        "1. You are texting a close friend. Keep it SHORT.\n"
-        "2. NEVER use cheesy AI phrases like 'How can I help you?'.\n"
-        "3. Use modern, casual slang naturally (e.g., vibes, tbh, slay, lowkey).\n"
-    )
+    # 🚀 UPDATED CORE & PERSONALITY INTEGRATION
+    system_instruction = f"{AHVI_SYSTEM_PROMPT}\n\n{PERSONALITY_LAYER}"
     
     system_instruction += f"\nWHAT YOU KNOW ABOUT THEIR TASTE: {new_memory}\n"
     
