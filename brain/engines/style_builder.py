@@ -22,30 +22,32 @@ class StyleBuilderEngine:
             return {}
 
     # =========================================================
-    # 🔍 FILTER HELPERS
+    # 🔍 FILTER HELPERS (🚀 NULL-SAFE)
     # =========================================================
     def _filter_by_type(self, wardrobe, keyword):
-        return [i for i in wardrobe if keyword in i.get("type", i.get("category", "")).lower()]
+        # Safely convert to string before calling .lower() to prevent Appwrite null crashes
+        return [i for i in wardrobe if keyword in str(i.get("type") or i.get("category", "")).lower()]
 
     # =========================================================
-    # 🎯 ITEM SCORING
+    # 🎯 ITEM SCORING (🚀 NULL-SAFE)
     # =========================================================
     def _score_item(self, item, occasion, weather, vibe, dna):
         score = 0
 
-        if occasion and occasion in item.get("tags", []):
+        # Use 'or []' to prevent iterating over None
+        if occasion and occasion in (item.get("tags") or []):
             score += 3
 
-        if weather and weather in item.get("weather", []):
+        if weather and weather in (item.get("weather") or []):
             score += 2
 
-        if vibe and vibe in item.get("vibe", []):
+        if vibe and vibe in (item.get("vibe") or []):
             score += 2
 
         if dna:
-            if item.get("color") in dna.get("preferred_colors", []):
+            if item.get("color") in (dna.get("preferred_colors") or []):
                 score += 2
-            if item.get("name") in dna.get("disliked_items", []):
+            if item.get("name") in (dna.get("disliked_items") or []):
                 score -= 3
 
         return score
@@ -122,10 +124,10 @@ class StyleBuilderEngine:
             return {
                 "board_type": "style_board",
                 "outfits": [],
-                "context": "Not enough wardrobe items"
+                "context": "Not enough matching items found in your wardrobe!"
             }
 
-        # 5. APPLY EVENT RULES (optional enhancement)
+        # 5. APPLY EVENT RULES
         accessories = []
         if occasion and self.events_bank:
             event_rules = self.events_bank.get(occasion, {})
@@ -135,9 +137,9 @@ class StyleBuilderEngine:
         formatted = []
         for o in top_outfits:
             formatted.append({
-                "top": o["top"]["name"],
-                "bottom": o["bottom"]["name"],
-                "shoes": o["shoes"]["name"],
+                "top": o["top"].get("name", "Top"),
+                "bottom": o["bottom"].get("name", "Bottom"),
+                "shoes": o["shoes"].get("name", "Shoes"),
                 "score": o["score"]
             })
 
@@ -147,7 +149,7 @@ class StyleBuilderEngine:
                 + (f" in {weather} weather." if weather else ""),
             "outfits": formatted,
             "accessories": accessories,
-            "ui_layout": "carousel"  # 🔥 change for multi UI
+            "ui_layout": "carousel"
         }
 
 style_engine = StyleBuilderEngine()

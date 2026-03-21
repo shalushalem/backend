@@ -1,93 +1,104 @@
+# backend/services/translation.py
+
 import re
-import string
-import unicodedata
-import requests
 from deep_translator import GoogleTranslator
+from services import llm_service
 
-# Import your newly separated LLM service and prompts
-from services.llm_service import generate_text
-import prompts
+# 🚀 Self-contained language detection prompt
+LANGUAGE_DETECTION_PROMPT = """
+Analyze the following text and determine its language or script format.
+Reply ONLY with one of these exact words:
+- english (if it's standard English)
+- tanglish (if it's Tamil words written in English letters, e.g., 'Eppadi irukka')
+- hinglish (if it's Hindi words written in English letters, e.g., 'Kaise ho')
+- telugu_script (if it contains actual Telugu letters like 'ఎలా ఉన్నారు')
+- hindi_script (if it contains actual Hindi letters like 'कैसे हो')
 
-# --- DYNAMIC NLP DICTIONARY ---
-NLP_ENGLISH_STOPWORDS = {
-    "i", "me", "my", "we", "our", "you", "your", "he", "him", "his", "she", "her", "it", "its", "they", "them", "their",
-    "what", "which", "who", "this", "that", "these", "those", "am", "is", "are", "was", "were", "be", "have", "has", "had", "do", "does", "did",
-    "a", "an", "the", "and", "but", "if", "or", "because", "as", "until", "while", "of", "at", "by", "for", "with", "about", "to", "from", "in", "out", "on", "off",
-    "when", "where", "why", "how", "all", "any", "some", "no", "not", "so", "can", "could", "will", "would", "just", "now", "yes", "ok", "okay",
-    "hi", "hii", "hello", "hey", "bro", "man", "buddy", "dude", "pls", "plz", "please", "yeah", "yep", "nah", "nope",
-    "outfit", "dress", "shirt", "pant", "pants", "jeans", "party", "wedding", "casual", "night", "look", "style", "wear", "suggest", "help", "need", "want", "tell",
-    "create", "make", "show", "give", "board", "bord", "pic", "picture", "photo", "image", "combo",
-    "pack", "travel", "trip", "vacation", "tour", "holiday"
-}
-
-def clean_romanized_text(text: str) -> str:
-    clean_text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
-    clean_text = clean_text.replace('c', 'ch')
-    if clean_text:
-        clean_text = clean_text[0].upper() + clean_text[1:]
-    return clean_text
+Text to analyze: "{text}"
+"""
 
 def dynamic_nlp_language_detector(text: str) -> str:
-    words = re.findall(r'\b\w+\b', text.lower())
-    foreign_words = [w for w in words if w not in NLP_ENGLISH_STOPWORDS]
-    
-    if len(foreign_words) == 0: 
-        return "english" 
+    """
+    Uses the local LLM to quickly classify if the romanized text is 
+    English, Tanglish, or Hinglish.
+    """
+    if not text or len(text.strip()) < 2:
+        return "english"
         
-    isolated_phrase = " ".join(foreign_words)
-    
-    # Use the prompt from prompts.py
-    prompt = prompts.get_language_detection_prompt(isolated_phrase)
-    
-    ans = generate_text(prompt, options={"temperature": 0.0}).upper()
-    
-    if "TANGLISH" in ans or "TELUGU" in ans: 
-        return "tanglish"
-    if "HINGLISH" in ans or "HINDI" in ans: 
-        return "hinglish"
-        
-    return "english"
+    # Quick regex checks for native scripts
+    if re.search(r'[\u0C00-\u0C7F]', text):
+        return "telugu_script"
+    if re.search(r'[\u0900-\u097F]', text):
+        return "hindi_script"
 
-def transliterate_and_translate(text: str, lang_code: str) -> str:
+    # For romanized text, ask the LLM
     try:
-        url = "https://inputtools.google.com/request"
-        params = {"text": text, "itc": f"{lang_code}-t-i0-und", "num": 1, "cp": 0, "cs": 1, "ie": "utf-8", "oe": "utf-8", "app": "demopage"}
-        data = requests.get(url, params=params, timeout=5).json()
+        prompt = LANGUAGE_DETECTION_PROMPT.format(text=text)
         
-        if data[0] == "SUCCESS":
-            native_script = " ".join([item[1][0] for item in data[1]])
-            return GoogleTranslator(source=lang_code, target='en').translate(native_script)
-    except: 
-        pass
+        # Use low temperature for deterministic classification
+        response = llm_service.generate_text(prompt, options={"temperature": 0.0})
+        clean_res = response.strip().lower()
         
-    return text
+        if "tanglish" in clean_res:
+            return "tanglish"
+        elif "hinglish" in clean_res:
+            return "hinglish"
+        else:
+            return "english"
+            
+    except Exception as e:
+        print(f"⚠️ NLP Language Detection Error: {e}")
+        return "english"
 
-def translate_to_script_and_romanized(english_text: str, target_lang: str):
-    url = "https://translate.googleapis.com/translate_a/single"
-    params = {"client": "gtx", "sl": "en", "tl": target_lang, "dt": ["t", "rm"], "q": english_text}
-    
+def transliterate_and_translate(text: str, target_lang_code: str) -> str:
+    """
+    Handles translation from Romanized regional languages (Tanglish/Hinglish)
+    to English by using GoogleTranslator.
+    """
     try:
-        data = requests.get(url, params=params, timeout=10).json()
-        native_script = "".join([item[0] for item in data[0] if item[0] and item[1]])
+        # Example: 'te' for Telugu (used for Tanglish approximation) or 'hi' for Hindi
+        translator = GoogleTranslator(source=target_lang_code, target='en')
+        english_text = translator.translate(text)
+        return english_text
+    except Exception as e:
+        print(f"⚠️ Transliteration Error: {e}")
+        return text
+
+def translate_to_script_and_romanized(english_text: str, target_lang_code: str) -> dict:
+    """
+    Translates English back to the native script (e.g., Hindi/Telugu).
+    """
+    try:
+        translator = GoogleTranslator(source='en', target=target_lang_code)
+        native_script = translator.translate(english_text)
         
-        last_item = data[0][-1]
-        romanized = last_item[2] if len(last_item) >= 3 and last_item[2] else native_script
-        
-        return {"native_script": native_script.strip(), "romanized": romanized.strip()}
-    except:
+        return {
+            "native_script": native_script,
+            "romanized": native_script # We return native script as fallback if romanized fails
+        }
+    except Exception as e:
+        print(f"⚠️ Translation Back to Script Error: {e}")
         return {"native_script": english_text, "romanized": english_text}
 
-def generate_natural_romanized(english_text: str, lang_type: str) -> str:
-    target_lang = "te" if lang_type == "tanglish" else "hi"
-    translations = translate_to_script_and_romanized(english_text, target_lang)
-    strict_romanized = translations["romanized"]
-    
-    # Use the prompt from prompts.py
-    prompt = prompts.get_romanized_rewrite_prompt(english_text, lang_type)
-    
-    ans = generate_text(prompt, options={"temperature": 0.2})
-    
-    if ans: 
-        return ans
+def generate_natural_romanized(english_text: str, style: str) -> str:
+    """
+    If the user spoke in Tanglish/Hinglish, we want AHVI to reply in the same vibe.
+    """
+    if style == "english":
+        return english_text
         
-    return clean_romanized_text(strict_romanized)
+    prompt = f"""
+    Translate the following English text into natural, conversational {style.capitalize()}.
+    Write the response entirely in English characters (Romanized).
+    Keep it friendly, short, and use modern slang where appropriate.
+    Do not use actual Hindi/Telugu script.
+    
+    English Text: "{english_text}"
+    """
+    
+    try:
+        response = llm_service.generate_text(prompt, options={"temperature": 0.7})
+        return response.strip()
+    except Exception as e:
+        print(f"⚠️ Romanized Generation Error: {e}")
+        return english_text

@@ -80,7 +80,6 @@ class Message(BaseModel):
     role: str
     content: str
 
-
 class TextChatRequest(BaseModel):
     messages: List[Message]
     language: str 
@@ -88,12 +87,15 @@ class TextChatRequest(BaseModel):
     user_profile: Dict[str, Any] = {} 
     wardrobe_items: List[Dict[str, Any]] = []
 
-
 @router.post("/api/text")
 def text_chat(request: TextChatRequest):
+    if not request.messages:
+        return {"message": {"role": "assistant", "content": "I didn't hear anything!"}}
+
     raw_user_input = request.messages[-1].content
     user_memory = request.current_memory
     wardrobe = request.wardrobe_items 
+    user_profile = request.user_profile if request.user_profile else {}
     
     # 1. Detect & Translate
     has_telugu = bool(re.search(r'[\u0C00-\u0C7F]', raw_user_input))
@@ -122,7 +124,6 @@ def text_chat(request: TextChatRequest):
     # 🚀 3. HYBRID INTENT ROUTER (Fast Python + LLM Fallback) 🚀
     print("🧠 Routing to Brain #0 (Hybrid Intent Analyzer)...")
     
-    # Run the fast, local NLU first!
     intent_data = nlu_router.classify_intent(english_input)
     occasion_slot = intent_data["slots"]["occasion"]
     
@@ -165,7 +166,6 @@ def text_chat(request: TextChatRequest):
             print(f"Router extraction failed: {e}")
 
     elif intent_data["status"] == "success" and occasion_slot:
-        print(f"⚡ FAST PATH: Detected styling intent '{occasion_slot}'. Bypassing LLM Router!")
         wants_outfit = True
         has_context = True
         
@@ -176,7 +176,6 @@ def text_chat(request: TextChatRequest):
 
     # --- SCENARIO B: WANTS PACKING LIST ---
     if wants_packing and not has_packing_context:
-         print("🛑 Missing Trip Details! Asking for destination/days...")
          clarifying_msg = router_data.get("clarifying_question", "Ooh a trip! ✈️ What city are we heading to?")
          dynamic_chips = ["Goa", "Mumbai", "London"]
 
@@ -205,79 +204,59 @@ def text_chat(request: TextChatRequest):
                  "wardrobe": wardrobe
              }
              
-             pack_res = requests.post("http://localhost:8000/api/generate-packing", json=pack_payload)
-             if pack_res.status_code == 200:
-                 pack_data = pack_res.json()
-                 styling_reason = pack_data.get("reasoning", "")
-                 suggested_counts = pack_data.get("suggested_counts", "") 
-                 pack_ids = pack_data.get("pack_list_ids", [])
-                 generic_pack_items = pack_data.get("generic_items", [])
-                 
-                 if pack_ids:
-                     pack_tag = f"[PACK_LIST: {', '.join(pack_ids)}]"
-                     packed_item_names = []
-                     for item in wardrobe:
-                         item_id = str(item.get("$id", item.get("id", "")))
-                         if item_id in pack_ids:
-                             packed_item_names.append(item.get("name", "A cute item"))
-                     packed_names_str = ", ".join(packed_item_names)
-
+             try:
+                 pack_res = requests.post("http://localhost:8000/api/generate-packing", json=pack_payload, timeout=60)
+                 if pack_res.status_code == 200:
+                     pack_data = pack_res.json()
+                     styling_reason = pack_data.get("reasoning", "")
+                     suggested_counts = pack_data.get("suggested_counts", "") 
+                     pack_ids = pack_data.get("pack_list_ids", [])
+                     generic_pack_items = pack_data.get("generic_items", [])
+                     
+                     if pack_ids:
+                         pack_tag = f"[PACK_LIST: {', '.join(pack_ids)}]"
+                         packed_item_names = []
+                         for item in wardrobe:
+                             item_id = str(item.get("$id", item.get("id", "")))
+                             if item_id in pack_ids:
+                                 packed_item_names.append(item.get("name", "A cute item"))
+                         packed_names_str = ", ".join(packed_item_names)
+             except Exception as e:
+                 print(f"Packing generation failed: {e}")
 
     # --- SCENARIO A: WANTS OUTFIT (POWERED BY FULL INTELLIGENCE PIPELINE) ---
     elif wants_outfit and not has_context:
-        print("🛑 Missing Outfit Context! Asking clarifying questions...")
         clarifying_msg = "Where are we heading? Tell me the vibe!"
         dynamic_chips = ["Office", "Party", "Casual"]
         
     elif wants_outfit and has_context and wardrobe:
-        print(f"✅ Context clear (Occasion: {occasion_slot}). Running full intelligence pipeline...")
-
-        # 🧠 1. Build clean context (NEW FLOW)
         context = context_engine.build_context(
-            user_id="temp_user",  # TODO: replace with real user_id
+            user_id="temp_user",
             intent_data=intent_data,
             wardrobe=wardrobe,
-            user_profile=request.user_profile,
-            history=[],  # TODO: plug DB later
-            vision={}    # TODO: plug CLIP later
+            user_profile=user_profile,
+            history=[],
+            vision={}
         )
 
-        # 🧬 2. Apply Style DNA
         context = style_dna_engine.enrich_context(context)
-
-        # 🎯 3. Generate outfit
         outfit_data = style_engine.build_outfit(context)
 
-        # 🔗 4. Map output → wardrobe items
         outfits = outfit_data.get("outfits", [])
         best = outfits[0] if outfits else {}
-
-        target_items = [
-            best.get("top"),
-            best.get("bottom"),
-            best.get("shoes")
-        ]
 
         matched_ids = []
         matched_names = []
 
-        # We check the actual names generated by the engine against the wardrobe
         for item in wardrobe:
             item_name = item.get("name", "")
             item_id = str(item.get("$id", item.get("id", "")))
 
-            if best.get("top") == item_name:
-                matched_ids.append(item_id)
-                matched_names.append(item_name)
-            elif best.get("bottom") == item_name:
-                matched_ids.append(item_id)
-                matched_names.append(item_name)
-            elif best.get("shoes") == item_name:
+            if best.get("top") == item_name or best.get("bottom") == item_name or best.get("shoes") == item_name:
                 matched_ids.append(item_id)
                 matched_names.append(item_name)
 
         if matched_ids:
-            # Generate the EXACT format your Flutter Appwrite UI needs
             style_tag = f"[STYLE_BOARD: {', '.join(matched_ids)}]"
             styling_reason = outfit_data.get("context", "Styled for your vibe")
             outfit_names_str = ", ".join(matched_names)
@@ -285,8 +264,10 @@ def text_chat(request: TextChatRequest):
             clarifying_msg = "I know the perfect outfit formula, but I couldn't find enough matching items in your virtual closet! Upload some more tops, bottoms, and shoes."
 
 
-    # 🚀 4. Setup Chat Context (Brain #1) 🚀
+    # 🚀 4. Setup Chat Context & History 🚀
     processed_messages = []
+    
+    # Extract previous history properly
     for msg in request.messages[:-1]:
         clean_content = msg.content
         if msg.role == "assistant":
@@ -300,10 +281,26 @@ def text_chat(request: TextChatRequest):
 
     processed_messages.append({"role": "user", "content": english_input})
     
-    # 🚀 UPDATED CORE & PERSONALITY INTEGRATION
+    # 🚀 5. EXTRACT PROFILE FOR PERSONALIZATION 🚀
+    user_name = user_profile.get("name", "Bestie")
+    user_style = user_profile.get("style", "")
+    fav_colors = ", ".join(user_profile.get("preferred_colors", []))
+    
+    # BUILD THE NEW HIGHLY PERSONALIZED SYSTEM PROMPT
     system_instruction = f"{AHVI_SYSTEM_PROMPT}\n\n{PERSONALITY_LAYER}"
     
-    system_instruction += f"\nWHAT YOU KNOW ABOUT THEIR TASTE: {new_memory}\n"
+    # 🧬 INJECT PERSONAL DNA
+    system_instruction += f"\n\n--- THE USER YOU ARE TALKING TO ---\n"
+    system_instruction += f"Name: {user_name} (Address them by their name naturally, but don't overuse it!)\n"
+    
+    if user_style: 
+        system_instruction += f"Style Vibe: {user_style}\n"
+    if fav_colors:
+        system_instruction += f"Favorite Colors: {fav_colors}\n"
+    
+    system_instruction += f"\n--- MEMORY & CONTEXT ---\n"
+    system_instruction += f"Long-term Memory: {new_memory}\n"
+    system_instruction += "IMPORTANT: You MUST read the previous messages in this chat history to understand the context of the conversation. Never act like every message is the first message.\n"
     
     if clarifying_msg:
         system_instruction += (
@@ -327,8 +324,8 @@ def text_chat(request: TextChatRequest):
             f"The Packing Engine has selected THESE SPECIFIC ITEMS from their virtual wardrobe: {packed_names_str}\n"
             f"Packing Math: {suggested_counts}\n"
             f"Reasoning: {styling_reason}\n"
-            f"1. You MUST first tell the user the 'Packing Math' (how many tops, bottoms, etc., they need).\n"
-            f"2. Mention the specific weather conditions Ahvi noticed.\n"
+            f"1. You MUST first tell the user the 'Packing Math'.\n"
+            f"2. Mention the specific weather conditions.\n"
             f"3. Do not list the specific items in the text. Just say 'I've added the perfect items to your checklist!'\n"
             f"4. Tell them not to forget their basics: {generic_items_str}.\n"
             "5. DO NOT output the [PACK_LIST] tag yourself."
@@ -336,7 +333,7 @@ def text_chat(request: TextChatRequest):
     elif wardrobe:
         system_instruction += f"\n--- USER'S VIRTUAL WARDROBE ---\n{json.dumps(wardrobe)}\n"
 
-    # 5. Generate Response
+    # 6. Generate Response
     llama_english_response = llm_service.chat_completion(processed_messages, system_instruction)
     
     # 🚨 DESTROY HALLUCINATED TAGS
@@ -351,7 +348,7 @@ def text_chat(request: TextChatRequest):
     llama_english_response = parsed_data["cleaned_text"]
     chips_list = parsed_data["chips"]
 
-    # 6. Translate Back
+    # 7. Translate Back
     if input_type in ["telugu_script", "hindi_script", "tanglish", "hinglish"]:
         if "script" in input_type:
             final_output = translation.translate_to_script_and_romanized(llama_english_response, target_lang)["native_script"]
@@ -360,10 +357,15 @@ def text_chat(request: TextChatRequest):
     else:
         final_output = llama_english_response
 
-    # 7. Celery Audio Task
-    task = run_heavy_audio_task.delay(final_output, target_lang)
+    # 8. Celery Audio Task
+    try:
+        task = run_heavy_audio_task.delay(final_output, target_lang)
+        audio_job_id = task.id
+    except Exception as e:
+        print(f"⚠️ Celery/Redis Offline (Skipping Audio Task): {e}")
+        audio_job_id = "offline"
 
-    # 8. EXTRACT IDS FOR THE FRONTEND STYLE BOARD PAGE
+    # 9. EXTRACT IDS FOR THE FRONTEND
     extracted_board_ids = ""
     if style_tag:
         match = re.search(r'\[STYLE_BOARD:\s*(.*?)\]', style_tag)
@@ -372,14 +374,14 @@ def text_chat(request: TextChatRequest):
 
     if pack_tag: 
         final_output = f"{final_output}\n{pack_tag}"
-    elif parsed_data["pack_tag"]:
+    elif parsed_data and parsed_data.get("pack_tag"):
         final_output = f"{final_output}\n{parsed_data['pack_tag']}"
 
     return {
-        "message": {"role": "assistant", "content": final_output},
-        "updated_memory": new_memory,
+        "message": {"role": "assistant", "content": str(final_output or "Oops, my AI brain is having trouble connecting! Make sure Ollama is running.")},
+        "updated_memory": str(new_memory or ""),
         "images": [], 
-        "chips": chips_list,
-        "audio_job_id": task.id,
-        "board_ids": extracted_board_ids
+        "chips": chips_list if isinstance(chips_list, list) else [],
+        "audio_job_id": str(audio_job_id or ""),
+        "board_ids": str(extracted_board_ids or "")
     }
