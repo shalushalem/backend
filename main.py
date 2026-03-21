@@ -48,7 +48,7 @@ app.add_middleware(
 )
 
 # 🧠 ROUTERS: The AI & Brain Endpoints
-app.include_router(chat.router, prefix="/api/chat", tags=["Chat & NLU"])
+app.include_router(chat.router, tags=["Chat & NLU"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio Processing"])
 app.include_router(stylist.router, prefix="/api/stylist", tags=["Styling"])            
 app.include_router(style_engine.router, prefix="/api/style-engine", tags=["Style Rules"])         

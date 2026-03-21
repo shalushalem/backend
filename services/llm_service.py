@@ -1,37 +1,13 @@
-import requests
-
-URL_GENERATE = "http://localhost:11434/api/generate"
-URL_CHAT = "http://localhost:11434/api/chat"
-
-def generate_text(prompt: str, model: str = "llama3.1", options: dict = None) -> str:
-    payload = {"model": model, "prompt": prompt, "stream": False}
-    if options:
-        payload["options"] = options
-    try:
-        # INCREASED TIMEOUT HERE (was 10)
-        response = requests.post(URL_GENERATE, json=payload, timeout=120) 
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except Exception as e:
-        print(f"LLM Generate Error: {e}")
-        return ""
-
-def chat_completion(messages: list, system_instruction: str, model: str = "llama3.1", response_format: str = None) -> str:
-    payload = {
-        "model": model,
-        "messages": [{"role": "system", "content": system_instruction}] + messages,
-        "stream": False
-    }
+def format_wardrobe_for_llm(items):
+    """
+    Converts Appwrite documents into a text summary for the AI.
+    """
+    if not items:
+        return "The user's wardrobe is currently empty."
     
-    # EXACT FIX: Force Ollama to only output JSON characters
-    if response_format == "json":
-        payload["format"] = "json"
-        
-    try:
-        # EXACT FIX: INCREASED TIMEOUT HERE (was 120)
-        response = requests.post(URL_CHAT, json=payload, timeout=300) 
-        response.raise_for_status()
-        return response.json().get("message", {}).get("content", "").strip()
-    except Exception as e:
-        print(f"LLM Chat Error: {e}")
-        return ""
+    wardrobe_msg = "The user has the following items in their wardrobe:\n"
+    for item in items:
+        # Assuming your Appwrite doc has 'name', 'category', and 'color'
+        wardrobe_msg += f"- {item.get('name')} ({item.get('color')} {item.get('category')})\n"
+    
+    return wardrobe_msg
