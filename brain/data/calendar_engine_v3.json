@@ -1,0 +1,1292 @@
+{
+  "version": "3.0",
+  "name": "AHVI Calendar Predictive Life Engine",
+  "description": "Predictive calendar brain for AHVI. Classifies events, adapts tone, generates reminders, prep tasks, outfit prompts, packing hints, day briefings, finance nudges, family coordination, and follow-up suggestions.",
+  "settings": {
+    "default_timezone": "Asia/Kolkata",
+    "default_tone_profile": "casual_warm",
+    "notification_density_default": "balanced",
+    "prediction_mode": true,
+    "confidence_thresholds": {
+      "high": 0.85,
+      "medium": 0.65,
+      "low": 0.45
+    }
+  },
+  "tone_engine": {
+    "goal": "Sound casual, human, adaptive, and helpful. Never robotic.",
+    "profiles": {
+      "casual_warm": {
+        "style": ["friendly", "clear", "supportive", "low-pressure"],
+        "openers": ["Quick heads-up", "Tiny reminder", "For later", "Just so this stays easy"],
+        "closers": ["You’re set.", "That should make the day smoother.", "One less thing to think about."]
+      },
+      "efficient": {
+        "style": ["direct", "minimal", "clean"],
+        "openers": ["Reminder", "Coming up", "Due soon"],
+        "closers": ["Done.", "Keep this in mind."]
+      },
+      "gentle": {
+        "style": ["calm", "soft", "reassuring"],
+        "openers": ["No rush, but", "A soft reminder", "Just so this doesn’t sneak up on you"],
+        "closers": ["We’ll keep it easy.", "Nothing hectic."]
+      },
+      "upbeat": {
+        "style": ["light", "encouraging", "positive"],
+        "openers": ["Okay", "You’ve got", "Little prep now, easier day later"],
+        "closers": ["You’re on it.", "That’s sorted."]
+      }
+    },
+    "adaptation_rules": [
+      {"condition": "user_prefers_short_messages", "profile": "efficient"},
+      {"condition": "user_needs_reassurance", "profile": "gentle"},
+      {"condition": "user_likes_light_energy", "profile": "upbeat"},
+      {"condition": "work_or_finance_context", "profile": "efficient"},
+      {"condition": "default", "profile": "casual_warm"}
+    ]
+  },
+  "classification_engine": {
+    "output_schema": {
+      "group": "",
+      "subtype": "",
+      "confidence_score": 0.0,
+      "matched_signals": [],
+      "missing_fields": [],
+      "needs_user_confirmation": false
+    },
+    "fallback": {
+      "if_confidence_below": 0.45,
+      "group": "miscellaneous",
+      "subtype": "generic_event",
+      "rule_pack": "misc_generic_event_v1",
+      "needs_user_confirmation": true
+    },
+    "disambiguation_rules": [
+      {
+        "input": "party",
+        "options": [
+          {"if": "linked_child_name_present", "subtype": "kids_birthday_party"},
+          {"if": "title_contains_birthday", "subtype": "birthday_party"},
+          {"if": "dress_code_contains_cocktail", "subtype": "cocktail"},
+          {"else": "birthday_party"}
+        ]
+      },
+      {
+        "input": "class",
+        "options": [
+          {"if": "linked_child_name_present", "subtype": "hobby_class"},
+          {"if": "title_contains_yoga_or_pilates", "group": "fitness"},
+          {"if": "meeting_link_present", "group": "learning"},
+          {"else": "class"}
+        ]
+      },
+      {
+        "input": "appointment",
+        "options": [
+          {"if": "title_contains_doctor_or_lab_or_dentist", "group": "health"},
+          {"if": "title_contains_salon_or_facial_or_nails", "group": "beauty"},
+          {"if": "title_contains_passport_or_visa_or_bank", "group": "appointments"},
+          {"else": "appointments"}
+        ]
+      }
+    ]
+  },
+  "user_profile_hooks": {
+    "stored_preferences": [
+      "preferred_reminder_density",
+      "preferred_tone_profile",
+      "travel_buffer_preference",
+      "night_before_planner",
+      "preferred_style_help_level",
+      "bill_payment_style",
+      "kids_profiles",
+      "work_formality_level",
+      "household_role"
+    ],
+    "behavioral_memory_examples": [
+      {"signal": "user_often_runs_late", "adjustment": "increase_leave_buffer"},
+      {"signal": "user_packs_night_before", "adjustment": "prioritize_evening_pack_prompt"},
+      {"signal": "user_forgets_gifts", "adjustment": "increase_gift_prompt_priority"},
+      {"signal": "user_likes_outfit_help", "adjustment": "auto_attach_style_prompt"},
+      {"signal": "user_ignores_low_priority_reminders", "adjustment": "merge_into_day_briefing"}
+    ]
+  },
+  "predictive_engine": {
+    "goal": "Infer what the user will need before an event and surface the most helpful next actions.",
+    "outputs": [
+      "prep_tasks",
+      "outfit_prompt",
+      "packing_list",
+      "buffer_plan",
+      "linked_errands",
+      "stress_load_score",
+      "household_coordination_prompt",
+      "followup_candidates"
+    ],
+    "prep_task_forecaster": {
+      "rules": [
+        {"condition": "travel_event", "tasks": ["check documents", "pack essentials", "set alarm", "leave with buffer"]},
+        {"condition": "formal_social_event", "tasks": ["finalize outfit", "check shoes and bag", "plan getting-ready time"]},
+        {"condition": "kids_event", "tasks": ["pack child items", "confirm reporting time", "coordinate pickup or drop"]},
+        {"condition": "health_event", "tasks": ["keep reports ready", "confirm fasting if needed", "leave with buffer"]},
+        {"condition": "bill_event", "tasks": ["keep payment method ready", "pay before due window if possible"]},
+        {"condition": "presentation_or_interview", "tasks": ["review deck or CV", "charge laptop", "set outfit aside"]}
+      ]
+    },
+    "outfit_forecaster": {
+      "rules": {
+        "airport": {
+          "style_mode": "travel_comfort",
+          "outfit_keywords": ["comfortable", "layered", "easy movement"],
+          "footwear_keywords": ["easy shoes"],
+          "accessory_keywords": ["tote or backpack"]
+        },
+        "work_meeting": {
+          "style_mode": "smart_work",
+          "outfit_keywords": ["polished", "smart casual"],
+          "footwear_keywords": ["clean work shoes"],
+          "accessory_keywords": ["structured bag"]
+        },
+        "presentation": {
+          "style_mode": "sharp_work",
+          "outfit_keywords": ["structured", "clean", "confident"],
+          "footwear_keywords": ["formal or polished shoes"],
+          "accessory_keywords": ["minimal polished accessories"]
+        },
+        "brunch": {
+          "style_mode": "easy_day_social",
+          "outfit_keywords": ["fresh", "light", "daytime-friendly"],
+          "footwear_keywords": ["easy daytime footwear"],
+          "accessory_keywords": ["light accessories"]
+        },
+        "cocktail": {
+          "style_mode": "evening_social",
+          "outfit_keywords": ["elevated", "evening", "sleek"],
+          "footwear_keywords": ["dressy shoes"],
+          "accessory_keywords": ["statement accessory or clutch"]
+        },
+        "wedding": {
+          "style_mode": "occasionwear",
+          "outfit_keywords": ["event-ready", "occasion", "photograph-friendly"],
+          "footwear_keywords": ["occasion shoes"],
+          "accessory_keywords": ["bag", "jewellery"]
+        },
+        "kids_school_event": {
+          "style_mode": "practical_polished",
+          "outfit_keywords": ["comfortable", "presentable", "easy to move in"],
+          "footwear_keywords": ["comfortable shoes"],
+          "accessory_keywords": ["hands-free bag"]
+        },
+        "gym_class": {
+          "style_mode": "activewear",
+          "outfit_keywords": ["activewear", "breathable"],
+          "footwear_keywords": ["workout shoes or grip socks"],
+          "accessory_keywords": ["hair tie", "water bottle"]
+        }
+      }
+    },
+    "packing_forecaster": {
+      "rules": {
+        "domestic_flight": ["ID", "phone", "wallet", "charger", "tickets", "medicines"],
+        "international_flight": ["passport", "visa", "phone", "wallet", "charger", "tickets", "medicines", "forex or cards"],
+        "hotel_stay": ["chargers", "toiletries", "nightwear", "essentials pouch"],
+        "doctor_appointment": ["reports", "ID", "wallet", "insurance if needed"],
+        "lab_test": ["ID", "reports if any", "water or snack after if allowed"],
+        "kids_birthday_party": ["gift", "water bottle", "socks if needed"],
+        "kids_school_event": ["costume or uniform", "shoes", "water bottle", "hair accessories if needed"],
+        "presentation": ["laptop", "charger", "deck", "notebook", "access card"],
+        "gym_class": ["water bottle", "towel", "shoes"],
+        "salon_appointment": ["reference images", "payment method"]
+      }
+    },
+    "buffer_planner": {
+      "rules": [
+        {"condition": "flight", "buffer_reason": "airport and check-in buffer needed"},
+        {"condition": "kids_event_with_reporting_time", "buffer_reason": "kids events usually take longer than expected"},
+        {"condition": "formal_event", "buffer_reason": "getting-ready time matters here"},
+        {"condition": "work_event_with_commute", "buffer_reason": "avoid commute stress"},
+        {"condition": "user_often_runs_late", "buffer_reason": "extra personal buffer applied"}
+      ]
+    },
+    "errand_cluster_engine": {
+      "rules": [
+        {"condition": "gift_required", "suggest": ["buy gift", "wrap if needed"]},
+        {"condition": "travel_event", "suggest": ["pack meds", "charge devices", "download tickets"]},
+        {"condition": "multiple_bills_same_week", "suggest": ["clear all due payments together"]},
+        {"condition": "kids_event_plus_school_fee_due", "suggest": ["handle fee with school-related prep"]},
+        {"condition": "salon_before_social_event", "suggest": ["sync beauty prep with event timing"]}
+      ]
+    },
+    "stress_load_engine": {
+      "score_bands": {
+        "0_25": "light",
+        "26_50": "manageable",
+        "51_75": "busy",
+        "76_100": "heavy"
+      },
+      "factors": [
+        "number_of_events_same_day",
+        "criticality",
+        "commute_load",
+        "prep_intensity",
+        "household_or_kids_coordination",
+        "work_plus_social_stack",
+        "financial_due_items_same_day",
+        "early_morning_start"
+      ],
+      "responses": [
+        {"condition": "stress_load_score_over_70", "action": "send_evening_prep_summary"},
+        {"condition": "stress_load_score_over_80", "action": "reduce_nonessential_notifications"},
+        {"condition": "stress_load_score_over_60", "action": "surface_easy_outfit_prompt"}
+      ]
+    },
+    "followup_engine": {
+      "rules": [
+        {"condition": "flight_arrival", "suggest": ["hotel check-in reminder", "unpack essentials prompt"]},
+        {"condition": "kids_birthday_party", "suggest": ["thank-you message reminder optional"]},
+        {"condition": "doctor_appointment", "suggest": ["medicine refill", "next checkup if recommended"]},
+        {"condition": "interview", "suggest": ["follow-up email reminder"]},
+        {"condition": "bill_paid", "suggest": ["mark done in finance summary"]}
+      ]
+    }
+  },
+  "family_shared_calendar_logic": {
+    "supported_profiles": ["self", "partner", "child", "parent", "household_shared"],
+    "family_account_sync": {
+      "goal": "Let AHVI work like one connected household calendar brain across family accounts, while still respecting ownership, privacy, and role-based visibility.",
+      "supported_sync_models": [
+        "parent_child_sync",
+        "couple_sync",
+        "household_shared_calendar",
+        "caregiver_sync",
+        "selective_event_sharing"
+      ],
+      "account_roles": {
+        "primary_admin": {
+          "can_link_accounts": true,
+          "can_manage_shared_calendars": true,
+          "can_set_visibility_rules": true,
+          "can_assign_household_owners": true,
+          "can_manage_kids_profiles": true
+        },
+        "adult_member": {
+          "can_view_shared_events": true,
+          "can_create_shared_events": true,
+          "can_edit_own_events": true,
+          "can_receive_coordination_prompts": true
+        },
+        "child_profile": {
+          "can_have_events_managed_by_guardian": true,
+          "can_receive_age_appropriate_reminders": false,
+          "visible_through_guardian_account": true
+        },
+        "caregiver": {
+          "can_view_permitted_child_events": true,
+          "can_receive_pickup_drop_prompts": true,
+          "can_mark_task_handoffs": true
+        }
+      },
+      "sync_objects": {
+        "shareable": [
+          "event_title",
+          "date",
+          "start_time",
+          "end_time",
+          "venue_name",
+          "linked_child_name",
+          "household_owner",
+          "pickup_drop_responsibility",
+          "gift_required",
+          "documents_required",
+          "payment_required",
+          "prep_status",
+          "completion_status"
+        ],
+        "private_by_default": [
+          "health_notes",
+          "therapy_notes",
+          "personal_notes",
+          "sensitive_finance_details",
+          "medical_documents",
+          "private_relationship_context"
+        ]
+      },
+      "visibility_modes": {
+        "private": "Visible only to event owner.",
+        "shared_household": "Visible to linked family members.",
+        "guardian_only": "Visible only to approved guardians/admins.",
+        "selected_members_only": "Visible only to explicitly chosen members.",
+        "summary_only": "Shows timing and logistics but hides sensitive notes."
+      },
+      "sync_behaviors": [
+        "merge household events into a shared family timeline",
+        "keep personal/private events separate unless explicitly shared",
+        "surface duplicate or overlapping family events",
+        "assign responsibility tags for pickup, bills, gifts, travel, or check-ins",
+        "show who owns the event and who needs to act",
+        "sync prep status across linked members when relevant"
+      ],
+      "conflict_management": {
+        "rules": [
+          "if two adults are assigned the same pickup, AHVI asks for confirmation",
+          "if two family events overlap, AHVI flags conflict and suggests who may need to adjust",
+          "if a shared bill is unpaid near due time, AHVI can notify the assigned payer first, then household admin if allowed",
+          "if school event and work event overlap for the same guardian, AHVI highlights coordination risk"
+        ]
+      },
+      "household_task_handoffs": {
+        "supported": [
+          "pickup_drop",
+          "gift_purchase",
+          "bill_payment",
+          "document_carry",
+          "school_event_attendance",
+          "travel_prep",
+          "medicine_pickup"
+        ],
+        "status_values": [
+          "unassigned",
+          "assigned",
+          "in_progress",
+          "done"
+        ]
+      },
+      "kids_sync_rules": {
+        "goal": "Make child-related events visible and actionable for the right adults without cluttering everyone else's calendar.",
+        "behaviors": [
+          "child events can appear on both parents' calendars when enabled",
+          "pickup and reporting-time events get higher reminder priority",
+          "school fees can appear under both kids and finance views",
+          "costume, sportswear, gifts, and forms can be synced as shared prep items",
+          "one adult can be primary owner while another gets backup visibility"
+        ]
+      },
+      "couple_sync_rules": {
+        "behaviors": [
+          "shared dinners, travel, bills, and social events can appear on both calendars",
+          "joint reminders can be converted into role-specific prompts",
+          "AHVI can ask who is handling what when a shared event needs prep"
+        ]
+      },
+      "finance_sync_rules": {
+        "behaviors": [
+          "shared rent, school fees, utilities, and EMIs can be tagged as household payments",
+          "assigned payer receives primary due reminders",
+          "household admin can receive escalation reminders if enabled",
+          "other members may see summary-only visibility"
+        ]
+      },
+      "travel_sync_rules": {
+        "behaviors": [
+          "family trips can sync flights, hotel check-ins, packing, and wake-up reminders",
+          "AHVI can generate separate prompts for each traveler role",
+          "parents can receive child packing prompts while adults get document prompts"
+        ]
+      },
+      "suggested_data_model": {
+        "family_account": {
+          "family_id": "",
+          "members": [
+            {
+              "member_id": "",
+              "name": "",
+              "role": "primary_admin",
+              "visibility_default": "shared_household"
+            }
+          ],
+          "shared_calendars": [
+            "household",
+            "kids",
+            "finance",
+            "travel"
+          ]
+        },
+        "shared_event_overlay": {
+          "event_id": "",
+          "owner_member_id": "",
+          "shared_with_member_ids": [],
+          "visibility_mode": "shared_household",
+          "responsibility_map": {
+            "pickup": "",
+            "payment": "",
+            "gift": ""
+          },
+          "household_status": "assigned"
+        }
+      }
+    },
+    "rules": [
+      {"condition": "linked_child_name_present", "apply": ["child_specific_checklist", "parent_buffer_reminders", "pickup_coordination_prompt"]},
+      {"condition": "shared_calendar_members_present", "apply": ["show_who_event_is_for", "avoid_duplicate_generic_reminders"]},
+      {"condition": "household_bill_event", "apply": ["mark_as_household_obligation", "surface_in_finance_briefing"]},
+      {"condition": "shared_family_event", "apply": ["show_owner", "show_responsible_member", "sync_relevant_prep_status"]},
+      {"condition": "child_event_shared_with_guardians", "apply": ["sync_to_guardian_views", "prioritize_reporting_and_pickup_reminders"]}
+    ],
+    "coordination_prompts": {
+      "pickup": "Quick check — who’s doing pickup today?",
+      "gift": "This one may need a gift. Better to sort it before the rush.",
+      "school": "Worth checking if anything extra is needed from school for this.",
+      "bill": "This payment is coming up. Want to clear it early and forget about it?",
+      "shared_event": "Want me to mark who’s handling this one?",
+      "conflict": "There’s a family timing clash here — want to assign who’s covering what?"
+    }
+  },
+  "day_briefing_engine": {
+    "enabled": true,
+    "types": {
+      "morning_brief": {
+        "sections": ["critical_today", "timed_events", "leave_by_times", "due_payments", "one_style_hint", "one_carry_hint"]
+      },
+      "evening_prep_brief": {
+        "sections": ["tomorrow_critical", "prep_tonight", "outfit_hint", "packing_hint", "alarm_hint", "payments_due_soon"]
+      },
+      "busy_day_rescue": {
+        "sections": ["top_three_must_not_miss", "what_to_prep_first", "what_can_wait"]
+      }
+    },
+    "merge_rules": [
+      {"condition": "same_day_multiple_low_priority_events", "apply": "merge_into_one_summary"},
+      {"condition": "bill_plus_social_plus_work_same_day", "apply": "sort_by_time_then_criticality"},
+      {"condition": "stress_load_score_over_70", "apply": "use_busy_day_rescue_format"}
+    ]
+  },
+  "finance_prediction_layer": {
+    "goal": "Turn bill events into proactive life management instead of one-off reminders.",
+    "behaviors": [
+      "cluster_same_week_payments",
+      "highlight_due_today_items",
+      "distinguish_autopay_vs_manual",
+      "surface_school_fee_under_kids_plus_finance",
+      "suggest_clearing_small_bills_together"
+    ],
+    "briefing_sections": ["due_today", "due_this_week", "autopay_today", "manual_action_needed"]
+  },
+  "groups": {
+    "travel": {
+      "subtypes": {
+        "domestic_flight": {"keywords": ["domestic flight", "flight to", "airport departure"], "rule_pack": "travel_domestic_flight_v3"},
+        "international_flight": {"keywords": ["international flight", "passport check", "immigration"], "rule_pack": "travel_international_flight_v3"},
+        "train": {"keywords": ["train", "station", "pnr", "platform"], "rule_pack": "travel_train_v2"},
+        "bus": {"keywords": ["bus", "boarding point", "coach"], "rule_pack": "travel_bus_v2"},
+        "hotel_checkin": {"keywords": ["hotel check in", "hotel check-in"], "rule_pack": "travel_hotel_checkin_v2"},
+        "hotel_checkout": {"keywords": ["hotel checkout", "check-out"], "rule_pack": "travel_hotel_checkout_v2"},
+        "visa_appointment": {"keywords": ["visa appointment", "vfs", "embassy appointment"], "rule_pack": "travel_visa_appointment_v2"}
+      }
+    },
+    "work": {
+      "subtypes": {
+        "work_meeting": {"keywords": ["meeting", "sync", "review", "1:1", "client call"], "rule_pack": "work_meeting_v3"},
+        "presentation": {"keywords": ["presentation", "pitch", "demo", "deck review"], "rule_pack": "work_presentation_v3"},
+        "interview": {"keywords": ["interview", "hr round", "technical round"], "rule_pack": "work_interview_v2"},
+        "conference": {"keywords": ["conference", "summit", "networking event", "expo"], "rule_pack": "work_conference_v2"},
+        "deadline": {"keywords": ["deadline", "due", "submission"], "rule_pack": "work_deadline_v2"}
+      }
+    },
+    "school": {
+      "subtypes": {
+        "class": {"keywords": ["class", "lecture", "tuition"], "rule_pack": "school_class_v2"},
+        "exam": {"keywords": ["exam", "test", "assessment"], "rule_pack": "school_exam_v2"},
+        "assignment_deadline": {"keywords": ["assignment due", "project due"], "rule_pack": "school_assignment_deadline_v2"},
+        "parent_teacher_meeting": {"keywords": ["ptm", "parent teacher meeting"], "rule_pack": "school_ptm_v3"},
+        "annual_day": {"keywords": ["annual day", "school performance"], "rule_pack": "school_annual_day_v3"},
+        "sports_day": {"keywords": ["sports day", "athletics", "race day"], "rule_pack": "school_sports_day_v3"},
+        "school_fee_payment": {"keywords": ["school fees", "fee payment"], "rule_pack": "finance_school_fee_payment_v3"}
+      }
+    },
+    "kids": {
+      "subtypes": {
+        "playdate": {"keywords": ["playdate"], "rule_pack": "kids_playdate_v3"},
+        "kids_birthday_party": {"keywords": ["kids birthday", "birthday party", "party invite"], "rule_pack": "kids_birthday_party_v3"},
+        "pickup_drop": {"keywords": ["pickup", "pick up", "drop", "drop off"], "rule_pack": "kids_pickup_drop_v3"},
+        "hobby_class": {"keywords": ["music class", "dance class", "art class", "karate", "swimming class"], "rule_pack": "kids_hobby_class_v3"},
+        "competition": {"keywords": ["competition", "contest", "performance"], "rule_pack": "kids_competition_v3"}
+      }
+    },
+    "social": {
+      "subtypes": {
+        "birthday_party": {"keywords": ["birthday", "birthday party"], "rule_pack": "social_birthday_party_v3"},
+        "dinner": {"keywords": ["dinner", "dinner plans"], "rule_pack": "social_dinner_v3"},
+        "brunch": {"keywords": ["brunch"], "rule_pack": "social_brunch_v3"},
+        "cocktail": {"keywords": ["cocktail", "cocktail party"], "rule_pack": "social_cocktail_v3"},
+        "wedding": {"keywords": ["wedding", "shaadi", "nikah"], "rule_pack": "social_wedding_v3"},
+        "reception": {"keywords": ["reception"], "rule_pack": "social_reception_v2"},
+        "date": {"keywords": ["date night", "date"], "rule_pack": "social_date_v3"},
+        "family_gathering": {"keywords": ["family dinner", "family gathering"], "rule_pack": "family_gathering_v2"}
+      }
+    },
+    "health": {
+      "subtypes": {
+        "doctor_appointment": {"keywords": ["doctor appointment", "consultation"], "rule_pack": "health_doctor_appointment_v3"},
+        "dentist": {"keywords": ["dentist", "dental"], "rule_pack": "health_dentist_v2"},
+        "lab_test": {"keywords": ["blood test", "lab test", "scan", "xray", "mri"], "rule_pack": "health_lab_test_v3"},
+        "therapy": {"keywords": ["therapy", "counselling", "session"], "rule_pack": "health_therapy_v2"},
+        "medicine_refill": {"keywords": ["medicine refill", "refill meds"], "rule_pack": "health_medicine_refill_v2"}
+      }
+    },
+    "fitness": {
+      "subtypes": {
+        "gym_class": {"keywords": ["gym", "training session", "workout"], "rule_pack": "fitness_gym_class_v3"},
+        "yoga": {"keywords": ["yoga"], "rule_pack": "fitness_yoga_v2"},
+        "pilates": {"keywords": ["pilates"], "rule_pack": "fitness_pilates_v2"},
+        "run": {"keywords": ["run", "morning run", "jog"], "rule_pack": "fitness_run_v2"},
+        "sports_practice": {"keywords": ["practice", "sports training"], "rule_pack": "fitness_sports_practice_v2"}
+      }
+    },
+    "beauty": {
+      "subtypes": {
+        "salon_appointment": {"keywords": ["salon", "hair appointment", "nails", "facial"], "rule_pack": "beauty_salon_appointment_v3"},
+        "makeup_trial": {"keywords": ["makeup trial", "bridal trial"], "rule_pack": "beauty_makeup_trial_v2"}
+      }
+    },
+    "finance": {
+      "subtypes": {
+        "electricity_bill": {"keywords": ["electricity bill", "power bill", "eb bill"], "rule_pack": "finance_electricity_bill_v3"},
+        "water_bill": {"keywords": ["water bill"], "rule_pack": "finance_water_bill_v3"},
+        "gas_bill": {"keywords": ["gas bill", "pipeline gas", "cylinder payment"], "rule_pack": "finance_gas_bill_v3"},
+        "internet_bill": {"keywords": ["internet bill", "wifi bill", "broadband"], "rule_pack": "finance_internet_bill_v3"},
+        "mobile_bill": {"keywords": ["mobile bill", "phone bill", "recharge due"], "rule_pack": "finance_mobile_bill_v3"},
+        "credit_card_bill": {"keywords": ["credit card bill", "card due", "minimum due"], "rule_pack": "finance_credit_card_bill_v3"},
+        "rent_payment": {"keywords": ["rent", "house rent", "apartment rent"], "rule_pack": "finance_rent_payment_v3"},
+        "loan_emi": {"keywords": ["emi", "loan payment", "installment"], "rule_pack": "finance_loan_emi_v3"},
+        "insurance_premium": {"keywords": ["premium", "insurance payment", "policy due"], "rule_pack": "finance_insurance_premium_v3"},
+        "subscription_payment": {"keywords": ["subscription", "renewal", "netflix", "spotify", "prime", "icloud", "google one"], "rule_pack": "finance_subscription_payment_v3"},
+        "tax_payment": {"keywords": ["tax payment", "gst due", "income tax", "property tax"], "rule_pack": "finance_tax_payment_v3"},
+        "school_fee_payment": {"keywords": ["school fees", "fee payment"], "rule_pack": "finance_school_fee_payment_v3"}
+      }
+    },
+    "miscellaneous": {
+      "subtypes": {
+        "generic_event": {"keywords": [], "rule_pack": "misc_generic_event_v1"}
+      }
+    }
+  },
+  "rule_packs": {
+    "travel_domestic_flight_v3": {
+      "priority": "critical",
+      "checklists": {
+        "carry": ["ID", "phone", "wallet", "charger", "tickets", "medicines"],
+        "wear": ["comfortable travel outfit", "easy shoes", "light layer"],
+        "prep_tonight": ["check in", "keep ID easy to grab", "pack chargers", "set alarm"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Quick heads-up — your flight is tomorrow. Check in and save the boarding pass."},
+        {"offset": "-12h", "message": "Pack the basics tonight so morning-you has it easy: ID, charger, meds, wallet."},
+        {"offset": "-10h", "message": "Set your wake-up alarm now so this doesn’t turn chaotic in the morning."},
+        {"offset": "-4h", "message": "Flight day. Keep your ID and phone somewhere obvious before you leave."},
+        {"offset": "-3h", "message": "Time to head out soon. Better to be early than airport-stressed."},
+        {"offset": "-30m", "message": "Final check: ID, phone, wallet, charger, luggage."}
+      ],
+      "followups": ["hotel_checkin_candidate", "arrival_unwind_prompt"]
+    },
+    "travel_international_flight_v3": {
+      "priority": "critical",
+      "checklists": {
+        "carry": ["passport", "visa", "wallet", "charger", "tickets", "medicines", "forex or cards"],
+        "documents": ["passport", "visa", "boarding pass", "hotel details"],
+        "prep_tonight": ["check in", "keep all documents together", "pack chargers", "set alarm"]
+      },
+      "reminders": [
+        {"offset": "-48h", "message": "Just a heads-up — double-check passport, visa, and travel docs now instead of later."},
+        {"offset": "-24h", "message": "Check in for your flight and keep the boarding pass handy."},
+        {"offset": "-12h", "message": "Tonight’s packing check: passport, chargers, meds, cards, and your travel basics."},
+        {"offset": "-10h", "message": "Set your alarm now. International travel has enough going on already."},
+        {"offset": "-4h", "message": "Time to leave with enough buffer for immigration and check-in."},
+        {"offset": "-30m", "message": "Final check: passport, visa, phone, wallet, charger, luggage."}
+      ],
+      "followups": ["hotel_checkin_candidate", "arrival_unwind_prompt"]
+    },
+    "work_meeting_v3": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["laptop", "charger", "notes if needed"],
+        "prep_tonight": ["skim agenda if useful"]
+      },
+      "reminders": [
+        {"offset": "-1h", "message": "Quick reminder — skim the agenda and open anything you’ll need for the meeting."},
+        {"offset": "-15m", "message": "Meeting soon. Link, notes, and charger check."}
+      ]
+    },
+    "work_presentation_v3": {
+      "priority": "critical",
+      "checklists": {
+        "carry": ["laptop", "charger", "deck", "notebook", "access card"],
+        "wear": ["polished work look"],
+        "prep_tonight": ["final deck review", "backup file ready", "charger packed"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Presentation tomorrow. Do one clean deck review tonight and call it done."},
+        {"offset": "-1h", "message": "Open the final deck now, not five minutes before."},
+        {"offset": "-20m", "message": "Laptop, charger, deck, notes. You’re set."}
+      ]
+    },
+    "work_interview_v2": {
+      "priority": "critical",
+      "checklists": {
+        "carry": ["CV", "ID", "charger", "notebook"],
+        "wear": ["clean polished interview look"],
+        "prep_tonight": ["keep outfit ready", "save link or route", "keep CV handy"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Interview tomorrow. Keep your outfit, CV, and basics ready tonight."},
+        {"offset": "-2h", "message": "Quick check before interview mode: CV, link or venue, charger, and a few calm breaths."},
+        {"offset": "-20m", "message": "You’re almost on. Notes open, CV ready, link checked."}
+      ],
+      "followups": ["interview_followup_email_candidate"]
+    },
+    "work_conference_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["charger", "badge if needed", "notebook"],
+        "wear": ["polished smart work look"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "Conference tomorrow. Keep your badge, charger, and anything you’ll need ready tonight."},
+        {"offset": "-1h", "message": "Time to start heading out with some buffer."}
+      ]
+    },
+    "work_deadline_v2": {
+      "priority": "critical",
+      "checklists": {
+        "prep_tonight": ["final pass", "submission check"]
+      },
+      "reminders": [
+        {"offset": "-2d", "message": "This deadline is coming up. Worth getting the final bits sorted now."},
+        {"offset": "-1d", "message": "Due tomorrow. A final pass today will make tomorrow lighter."},
+        {"offset": "-2h", "message": "Due soon. Final check and submit when ready."}
+      ]
+    },
+    "school_ptm_v3": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["notebook", "fee receipt if needed", "questions to ask"],
+        "prep_tonight": ["note talking points", "confirm timing"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "PTM tomorrow. Note down anything you want to ask so it’s all in one place."},
+        {"offset": "-1h", "message": "PTM coming up. Time to head out with a little buffer."}
+      ]
+    },
+    "school_annual_day_v3": {
+      "priority": "important",
+      "checklists": {
+        "child_items": ["costume", "shoes", "water bottle", "hair accessories if needed"],
+        "prep_tonight": ["keep full costume together", "confirm reporting time"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Annual Day tomorrow. Keep costume, shoes, bottle, and hair bits ready tonight."},
+        {"offset": "-2h", "message": "Quick check before you leave: costume, shoes, bottle, reporting time."}
+      ]
+    },
+    "school_sports_day_v3": {
+      "priority": "important",
+      "checklists": {
+        "child_items": ["sportswear", "shoes", "water bottle", "cap if needed"],
+        "prep_tonight": ["lay out sportswear", "pack bottle", "confirm timing"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Sports Day tomorrow. Keep sportswear, shoes, bottle, and any extras ready tonight."},
+        {"offset": "-2h", "message": "Sports Day check: shoes, bottle, cap if needed, and leave on time."}
+      ]
+    },
+    "kids_playdate_v3": {
+      "priority": "light",
+      "checklists": {
+        "child_items": ["water bottle", "socks if needed", "small snack if useful"]
+      },
+      "reminders": [
+        {"offset": "-2h", "message": "Playdate later. Quick check for socks, water, and anything your kid needs."}
+      ]
+    },
+    "kids_birthday_party_v3": {
+      "priority": "important",
+      "checklists": {
+        "child_items": ["gift", "outfit", "water bottle", "socks if needed"],
+        "prep_tonight": ["keep the gift ready", "set clothes aside"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Birthday party tomorrow. Keep the gift ready tonight so it’s not a last-minute scramble."},
+        {"offset": "-2h", "message": "Party check: gift, outfit, socks if needed, water bottle, and go."}
+      ],
+      "followups": ["thank_you_message_candidate"]
+    },
+    "kids_pickup_drop_v3": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["phone", "keys"]
+      },
+      "reminders": [
+        {"offset": "-20m", "message": "Pickup time soon. Time to head out."}
+      ]
+    },
+    "kids_hobby_class_v3": {
+      "priority": "important",
+      "checklists": {
+        "child_items": ["uniform if needed", "class materials", "water bottle"]
+      },
+      "reminders": [
+        {"offset": "-3h", "message": "Class later today. Keep the uniform or class items ready when you get a second."},
+        {"offset": "-30m", "message": "Class starts soon. Grab the basics and head out."}
+      ]
+    },
+    "kids_competition_v3": {
+      "priority": "important",
+      "checklists": {
+        "child_items": ["materials", "water bottle", "outfit", "ID if needed"],
+        "prep_tonight": ["pack everything in one bag"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Competition tomorrow. Keep everything packed tonight so the morning stays calm."},
+        {"offset": "-1h", "message": "Competition check: materials, water, outfit, reporting time."}
+      ]
+    },
+    "social_birthday_party_v3": {
+      "priority": "important",
+      "checklists": {
+        "wear": ["easy polished social look"],
+        "gift": ["gift if needed"],
+        "prep_tonight": ["decide outfit", "keep gift ready"]
+      },
+      "reminders": [
+        {"offset": "-6h", "message": "Birthday plans later. Worth deciding outfit and gift now so it’s easy later."},
+        {"offset": "-1h", "message": "Party soon. Gift, phone, wallet, keys — then go have fun."}
+      ]
+    },
+    "social_dinner_v3": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["polished easy look"],
+        "carry": ["phone", "wallet", "keys"]
+      },
+      "reminders": [
+        {"offset": "-3h", "message": "Dinner later. A polished easy look should work well here."},
+        {"offset": "-45m", "message": "Dinner soon. Time to head out so you’re not rushing."}
+      ]
+    },
+    "social_brunch_v3": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["fresh daytime look"],
+        "carry": ["phone", "wallet", "keys"]
+      },
+      "reminders": [
+        {"offset": "-2h", "message": "Brunch later. Something easy, fresh, and daytime-friendly should work nicely."},
+        {"offset": "-40m", "message": "Brunch soon. Start getting ready."}
+      ]
+    },
+    "social_cocktail_v3": {
+      "priority": "important",
+      "checklists": {
+        "wear": ["evening look", "shoes", "bag"],
+        "prep_tonight": ["set outfit aside if needed"]
+      },
+      "reminders": [
+        {"offset": "-6h", "message": "Cocktail plans later. Good time to lock outfit, shoes, and bag."},
+        {"offset": "-1h", "message": "Cocktail soon. Final check and head out."}
+      ]
+    },
+    "social_wedding_v3": {
+      "priority": "important",
+      "checklists": {
+        "wear": ["occasion outfit", "shoes", "bag", "jewellery"],
+        "gift": ["gift or envelope if needed"],
+        "prep_tonight": ["steam or iron outfit", "keep accessories together"]
+      },
+      "reminders": [
+        {"offset": "-48h", "message": "Wedding coming up. This is the moment to finalize outfit, shoes, bag, and jewellery."},
+        {"offset": "-24h", "message": "Steam or iron the outfit tonight and keep everything together."},
+        {"offset": "-5h", "message": "Wedding later. Give yourself enough getting-ready time so nothing feels rushed."},
+        {"offset": "-1h", "message": "Wedding soon. Outfit, shoes, bag, gift, phone, wallet — then out you go."}
+      ]
+    },
+    "social_reception_v2": {
+      "priority": "important",
+      "checklists": {
+        "wear": ["occasion look", "shoes", "bag"],
+        "gift": ["gift if needed"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Reception tomorrow. Good time to set your outfit and accessories aside."},
+        {"offset": "-1h", "message": "Reception soon. Final check and head out."}
+      ]
+    },
+    "social_date_v3": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["something that feels like you"],
+        "carry": ["phone", "wallet", "keys"]
+      },
+      "reminders": [
+        {"offset": "-3h", "message": "Date later. Pick something that feels like you and doesn’t need fussing with."},
+        {"offset": "-45m", "message": "Time to get going soon."}
+      ]
+    },
+    "family_gathering_v2": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["easy family-appropriate look"],
+        "carry": ["phone", "wallet", "keys"]
+      },
+      "reminders": [
+        {"offset": "-3h", "message": "Family plans later. Keep the easy basics ready and head out on time."}
+      ]
+    },
+    "health_doctor_appointment_v3": {
+      "priority": "critical",
+      "checklists": {
+        "documents": ["reports", "ID", "insurance if needed"],
+        "carry": ["phone", "wallet"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "Doctor appointment tomorrow. Keep reports, ID, and any notes in one place tonight."},
+        {"offset": "-1h", "message": "Appointment soon. Reports, wallet, phone, and time to head out."}
+      ],
+      "followups": ["medicine_refill_candidate", "next_checkup_candidate"]
+    },
+    "health_dentist_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["phone", "wallet"]
+      },
+      "reminders": [
+        {"offset": "-1h", "message": "Dentist appointment soon. Time to head out."}
+      ]
+    },
+    "health_lab_test_v3": {
+      "priority": "critical",
+      "checklists": {
+        "documents": ["reports if any", "ID"],
+        "carry": ["phone", "wallet"],
+        "prep_tonight": ["confirm fasting if needed"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "Lab test tomorrow. If fasting is needed, keep that in mind tonight."},
+        {"offset": "-1h", "message": "Test soon. Reports if any, ID, water after if needed, and go."}
+      ]
+    },
+    "health_therapy_v2": {
+      "priority": "important",
+      "checklists": {
+        "prep_tonight": ["keep the slot protected if possible"]
+      },
+      "reminders": [
+        {"offset": "-30m", "message": "Session soon. Give yourself a quiet few minutes before it starts."}
+      ]
+    },
+    "health_medicine_refill_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["prescription if needed"]
+      },
+      "reminders": [
+        {"offset": "-2d", "message": "Medicine refill is coming up. Good to sort before you run low."}
+      ]
+    },
+    "fitness_gym_class_v3": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["workout clothes", "shoes"],
+        "carry": ["water bottle", "towel"],
+        "prep_tonight": ["lay out outfit"]
+      },
+      "reminders": [
+        {"offset": "-10h", "message": "Lay out your workout clothes tonight. Makes tomorrow easier."},
+        {"offset": "-45m", "message": "Workout soon. Shoes, bottle, towel, and you’re good."}
+      ]
+    },
+    "fitness_yoga_v2": {
+      "priority": "light",
+      "checklists": {
+        "carry": ["mat if needed", "water bottle"]
+      },
+      "reminders": [
+        {"offset": "-45m", "message": "Yoga soon. Keep your mat and water ready."}
+      ]
+    },
+    "fitness_pilates_v2": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["activewear"],
+        "carry": ["grip socks", "water bottle"],
+        "prep_tonight": ["keep socks and outfit ready"]
+      },
+      "reminders": [
+        {"offset": "-10h", "message": "Pilates tomorrow. Keep your outfit and grip socks ready tonight."},
+        {"offset": "-45m", "message": "Pilates soon. Grab socks, bottle, and head out."}
+      ]
+    },
+    "fitness_run_v2": {
+      "priority": "light",
+      "checklists": {
+        "wear": ["running clothes", "shoes"],
+        "carry": ["water if needed"],
+        "prep_tonight": ["set clothes out"]
+      },
+      "reminders": [
+        {"offset": "-10h", "message": "Set your running clothes out tonight so morning-you can just go."},
+        {"offset": "-20m", "message": "Run soon. Shoes on, water if needed, and go."}
+      ]
+    },
+    "fitness_sports_practice_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["gear", "water bottle", "uniform if needed"]
+      },
+      "reminders": [
+        {"offset": "-2h", "message": "Practice later. Keep your gear and bottle ready."}
+      ]
+    },
+    "beauty_salon_appointment_v3": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["reference photos", "payment method"],
+        "prep_tonight": ["save inspo pics if needed"]
+      },
+      "reminders": [
+        {"offset": "-4h", "message": "Salon later. Save any reference pics now so you don’t go searching mid-way."},
+        {"offset": "-45m", "message": "Appointment soon. Time to head out."}
+      ]
+    },
+    "beauty_makeup_trial_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["reference images", "outfit context if needed"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "Makeup trial tomorrow. Keep references, outfit context, and inspo together."},
+        {"offset": "-45m", "message": "Time to head to your trial."}
+      ]
+    },
+    "finance_electricity_bill_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["payment app ready", "account funded if needed"]
+      },
+      "reminders": [
+        {"offset": "-7d", "message": "Electricity bill is due in 7 days."},
+        {"offset": "-3d", "message": "Electricity bill due in 3 days."},
+        {"offset": "-1d", "message": "Electricity bill is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the last day to pay the electricity bill."}
+      ]
+    },
+    "finance_water_bill_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["payment app ready"]
+      },
+      "reminders": [
+        {"offset": "-7d", "message": "Water bill is due in 7 days."},
+        {"offset": "-3d", "message": "Water bill due in 3 days."},
+        {"offset": "-1d", "message": "Water bill is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for the water bill."}
+      ]
+    },
+    "finance_gas_bill_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["payment app ready"]
+      },
+      "reminders": [
+        {"offset": "-7d", "message": "Gas bill is due in 7 days."},
+        {"offset": "-3d", "message": "Gas bill due in 3 days."},
+        {"offset": "-1d", "message": "Gas bill is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for the gas bill."}
+      ]
+    },
+    "finance_internet_bill_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["payment app ready"]
+      },
+      "reminders": [
+        {"offset": "-7d", "message": "Internet bill is due in 7 days."},
+        {"offset": "-3d", "message": "Internet bill due in 3 days."},
+        {"offset": "-1d", "message": "Internet bill is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for the internet bill."}
+      ]
+    },
+    "finance_mobile_bill_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["payment app ready"]
+      },
+      "reminders": [
+        {"offset": "-7d", "message": "Mobile bill is due in 7 days."},
+        {"offset": "-3d", "message": "Mobile bill due in 3 days."},
+        {"offset": "-1d", "message": "Mobile bill is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for the mobile bill."}
+      ]
+    },
+    "finance_credit_card_bill_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["amount ready", "payment app ready", "minimum due visible"]
+      },
+      "reminders": [
+        {"offset": "-5d", "message": "Credit card payment is due in 5 days. Nice one to clear before it gets too close."},
+        {"offset": "-2d", "message": "Credit card bill due in 2 days."},
+        {"offset": "-1d", "message": "Credit card bill is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for your credit card bill."}
+      ]
+    },
+    "finance_rent_payment_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["rent amount ready", "payment method ready"]
+      },
+      "reminders": [
+        {"offset": "-5d", "message": "Rent is due in 5 days."},
+        {"offset": "-2d", "message": "Rent payment due in 2 days."},
+        {"offset": "-1d", "message": "Rent is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for rent."}
+      ]
+    },
+    "finance_loan_emi_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["account balance ready"]
+      },
+      "reminders": [
+        {"offset": "-5d", "message": "EMI is due in 5 days."},
+        {"offset": "-2d", "message": "EMI due in 2 days."},
+        {"offset": "-1d", "message": "EMI is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for your EMI."}
+      ]
+    },
+    "finance_insurance_premium_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["premium amount ready", "payment method ready"]
+      },
+      "reminders": [
+        {"offset": "-10d", "message": "Insurance premium is coming up in 10 days."},
+        {"offset": "-3d", "message": "Insurance premium due in 3 days."},
+        {"offset": "-1d", "message": "Insurance premium is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for your insurance premium."}
+      ]
+    },
+    "finance_subscription_payment_v3": {
+      "priority": "important",
+      "checklists": {
+        "payment": ["review if you still want this subscription"]
+      },
+      "reminders": [
+        {"offset": "-2d", "message": "This subscription renews in 2 days."},
+        {"offset": "-1d", "message": "Subscription renews tomorrow."},
+        {"offset": "0d", "message": "Your subscription renews today."}
+      ],
+      "followups": ["subscription_cleanup_candidate"]
+    },
+    "finance_tax_payment_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["tax amount ready", "documents and portal access ready"]
+      },
+      "reminders": [
+        {"offset": "-30d", "message": "Tax deadline is a month away. Good to get this moving early."},
+        {"offset": "-10d", "message": "Tax deadline is in 10 days."},
+        {"offset": "-3d", "message": "Tax deadline in 3 days."},
+        {"offset": "0d", "message": "Today’s the tax deadline."}
+      ]
+    },
+    "finance_school_fee_payment_v3": {
+      "priority": "critical",
+      "checklists": {
+        "payment": ["amount ready", "payment link or app ready"]
+      },
+      "reminders": [
+        {"offset": "-7d", "message": "School fee is due in a week. Nice to get it out of the way early."},
+        {"offset": "-3d", "message": "School fee is due in 3 days."},
+        {"offset": "-1d", "message": "School fee is due tomorrow."},
+        {"offset": "0d", "message": "Today’s the due date for the school fee."}
+      ]
+    },
+    "travel_train_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["ticket", "phone", "wallet", "water", "charger"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "Tiny nudge — pack water, charger, snacks, and keep your ticket easy to find."},
+        {"offset": "-2h", "message": "Check station, platform if available, and give yourself some buffer."},
+        {"offset": "-45m", "message": "Time to head out so you’re not rushing the platform situation."}
+      ]
+    },
+    "travel_bus_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["phone", "wallet", "water", "charger"]
+      },
+      "reminders": [
+        {"offset": "-8h", "message": "Pack the simple essentials tonight: phone, charger, water, wallet."},
+        {"offset": "-1h", "message": "Time to start heading to the boarding point."}
+      ]
+    },
+    "travel_hotel_checkin_v2": {
+      "priority": "important",
+      "checklists": {
+        "carry": ["booking details", "ID", "payment method"]
+      },
+      "reminders": [
+        {"offset": "-6h", "message": "Quick reminder — keep your booking details and ID handy for check-in."},
+        {"offset": "-1h", "message": "You’ll be checking in soon. Keep payment and ID easy to access."}
+      ]
+    },
+    "travel_hotel_checkout_v2": {
+      "priority": "important",
+      "checklists": {
+        "prep_tonight": ["start packing", "check room drawers", "keep chargers visible"]
+      },
+      "reminders": [
+        {"offset": "-12h", "message": "You’ve got hotel checkout tomorrow. Pack what you can tonight so nothing gets left behind."},
+        {"offset": "-1h", "message": "Final room sweep: charger, toiletries, clothes, wallet, everything."}
+      ]
+    },
+    "travel_visa_appointment_v2": {
+      "priority": "critical",
+      "checklists": {
+        "documents": ["passport", "forms", "photos if needed", "payment proof"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Visa slot tomorrow. Keep every document in one folder tonight."},
+        {"offset": "-2h", "message": "Leave with enough buffer. These appointments are not worth cutting close."},
+        {"offset": "-30m", "message": "Final check: passport, documents, payment proof, appointment details."}
+      ]
+    },
+    "school_class_v2": {
+      "priority": "light",
+      "checklists": {
+        "carry": ["materials if needed"]
+      },
+      "reminders": [
+        {"offset": "-30m", "message": "Class coming up soon. Keep your materials nearby."}
+      ]
+    },
+    "school_exam_v2": {
+      "priority": "critical",
+      "checklists": {
+        "carry": ["admit card", "pens", "water bottle"]
+      },
+      "reminders": [
+        {"offset": "-24h", "message": "Exam tomorrow. Keep your admit card, stationery, and basics ready tonight."},
+        {"offset": "-1h", "message": "Exam soon. Admit card, pens, water, and leave on time."}
+      ]
+    },
+    "school_assignment_deadline_v2": {
+      "priority": "important",
+      "checklists": {
+        "prep_tonight": ["final review", "upload check"]
+      },
+      "reminders": [
+        {"offset": "-1d", "message": "Assignment due tomorrow. Finish the last pass today if you can."},
+        {"offset": "-2h", "message": "Submission due soon. Upload check before you move on."}
+      ]
+    },
+    "misc_generic_event_v1": {
+      "priority": "light",
+      "checklists": {
+        "carry": ["phone", "wallet", "keys"]
+      },
+      "reminders": [
+        {"offset": "-1h", "message": "Quick reminder — this is coming up soon."}
+      ]
+    }
+  },
+  "adaptive_logic": {
+    "rules": [
+      {"condition": "event_start_before_07_00", "add_reminder": {"offset": "-10h", "message": "Early start tomorrow — do the small prep tonight so morning stays easy."}},
+      {"condition": "travel_time_over_45_minutes", "behavior": "increase_leave_buffer"},
+      {"condition": "event_has_dress_code", "behavior": "include_style_prompt"},
+      {"condition": "linked_child_name_present", "behavior": "include_child_items_prompt"},
+      {"condition": "documents_required_present", "behavior": "include_document_check"},
+      {"condition": "gift_required_true", "behavior": "add_gift_prompt"},
+      {"condition": "auto_pay_enabled_true", "behavior": "replace_due_messages_with_autopay_copy"},
+      {"condition": "stress_load_score_over_70", "behavior": "use_rescue_briefing"}
+    ],
+    "autopay_messages": {
+      "-1d": "This gets auto-paid tomorrow. Just make sure the account is ready.",
+      "0d": "This should auto-pay today. Worth a quick glance later to be sure it went through."
+    }
+  },
+  "family_sync_examples": {
+    "example_1": {
+      "title": "Aarav Annual Day",
+      "owner": "mom",
+      "shared_with": ["dad"],
+      "visibility_mode": "shared_household",
+      "responsibility_map": {
+        "drop": "dad",
+        "pickup": "mom",
+        "costume_prep": "mom"
+      },
+      "ahvi_behavior": [
+        "show event on both parents' calendars",
+        "send costume prep reminder to mom",
+        "send leave-on-time reminder to dad",
+        "flag pickup ownership clearly"
+      ]
+    },
+    "example_2": {
+      "title": "Rent Payment",
+      "owner": "household_admin",
+      "shared_with": ["partner"],
+      "visibility_mode": "summary_only",
+      "responsibility_map": {
+        "payment": "partner"
+      },
+      "ahvi_behavior": [
+        "send primary due reminders to assigned payer",
+        "show summary in shared finance view",
+        "optionally escalate to admin on due day if unpaid"
+      ]
+    },
+    "example_3": {
+      "title": "Family Goa Trip",
+      "owner": "mom",
+      "shared_with": ["dad", "kids"],
+      "visibility_mode": "shared_household",
+      "responsibility_map": {
+        "documents": "dad",
+        "kids_packing": "mom",
+        "airport_cab": "dad"
+      },
+      "ahvi_behavior": [
+        "sync same trip across family accounts",
+        "separate document prompts from child packing prompts",
+        "show one household trip briefing with role-based prep"
+      ]
+    }
+  },
+  "developer_notes": {
+    "recommended_runtime_files": [
+      "calendar_types.ts",
+      "calendar_classifier.ts",
+      "calendar_predictive_engine.ts",
+      "calendar_checklist_engine.ts",
+      "calendar_tone_engine.ts",
+      "calendar_scheduler.ts",
+      "calendar_day_briefing.ts",
+      "calendar_family_logic.ts",
+      "calendar_wardrobe_linking.ts",
+      "calendar_finance_briefing.ts"
+    ],
+    "pipeline": [
+      "classify_event",
+      "score_confidence",
+      "extract_metadata",
+      "resolve_household_context",
+      "run_predictive_engine",
+      "generate_checklists",
+      "generate_outfit_and_packing_hints",
+      "compute_buffer_plan",
+      "compute_stress_load",
+      "apply_tone_profile",
+      "schedule_notifications",
+      "render_day_briefings",
+      "attach_followup_candidates"
+    ]
+  }
+,
+  "file_status": "complete",
+  "notes": "AHVI Calendar v3 rule set fully defined. Predictive engine, tone engine, classification, rule packs, and developer pipeline are complete.",
+  "next_recommended_layer": "runtime_typescript_modules"
+}

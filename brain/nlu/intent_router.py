@@ -1,70 +1,94 @@
 # backend/brain/nlu/intent_router.py
+
 import re
+from typing import Dict
 
 class IntentRouter:
     def __init__(self):
-        # Styling keywords
-        self.styling_keywords = ["wear", "outfit", "dress", "clothes", "style", "look", "matching", "fit"]
-        
-        self.occasions = {
-            "party looks": ["party", "club", "clubbing", "night out", "birthday", "pub"],
-            "office fits": ["office", "work", "interview", "formal", "meeting", "business", "corporate"],
-            "vacation": ["vacation", "trip", "holiday", "beach", "travel", "tour", "goa"],
-            "occasion": ["wedding", "marriage", "pelli", "shaadi", "reception", "sangeet", "festival", "event", "pooja", "occasion"],
-            "everything else": ["casual", "daily", "normal", "everyday", "relaxing", "random", "outside", "grocery", "everything else"]
-        }
-        
-        self.weather_conditions = {
-            "rainy": ["rain", "rainy", "monsoon", "wet"],
-            "summer": ["hot", "summer", "sunny", "warm", "sweat"],
-            "winter": ["cold", "winter", "chill", "snow", "freezing"]
-        }
 
-        # 🚀 NEW: Holistic Life Coach Keywords
-        self.life_keywords = {
-            "meal_planning": ["meal", "diet", "food", "protein", "vegan", "breakfast", "lunch", "dinner", "recipe", "calories"],
-            "life_goals": ["goal", "habit", "milestone", "focus", "resolution", "progress"],
-            "health_wellness": ["workout", "gym", "skincare", "skin", "meds", "medicine", "pill", "fitness", "exercise"],
-            "finance_home": ["bill", "coupon", "expense", "budget", "home", "utilities", "savings"]
+        # Precompile patterns for speed
+        self.styling_patterns = self._compile_patterns([
+            "wear", "outfit", "dress", "clothes", "style", "look", "matching", "fit"
+        ])
+
+        self.occasions = self._compile_dict_patterns({
+            "party looks": ["party", "club", "birthday", "pub"],
+            "office fits": ["office", "work", "interview", "meeting", "corporate"],
+            "vacation": ["vacation", "trip", "holiday", "beach", "travel", "goa"],
+            "occasion": ["wedding", "reception", "festival", "event", "pooja"],
+            "casual": ["casual", "daily", "everyday", "grocery"]
+        })
+
+        self.weather_conditions = self._compile_dict_patterns({
+            "rainy": ["rain", "rainy", "monsoon"],
+            "summer": ["hot", "summer", "sunny"],
+            "winter": ["cold", "winter", "freezing"]
+        })
+
+        self.life_keywords = self._compile_dict_patterns({
+            "meal_planning": ["meal", "diet", "food", "protein", "recipe"],
+            "life_goals": ["goal", "habit", "progress"],
+            "health_wellness": ["workout", "gym", "skincare", "fitness"],
+            "finance_home": ["bill", "budget", "expense", "savings"]
+        })
+
+    # =========================
+    # HELPERS
+    # =========================
+    def _compile_patterns(self, keywords):
+        return [re.compile(rf"\b{kw}\b", re.IGNORECASE) for kw in keywords]
+
+    def _compile_dict_patterns(self, data):
+        return {
+            key: [re.compile(rf"\b{kw}\b", re.IGNORECASE) for kw in values]
+            for key, values in data.items()
         }
 
     def normalize_text(self, text: str) -> str:
         return text.lower().strip()
 
-    def extract_slots(self, text: str) -> dict:
-        """Extracts specific details (slots) from the user's message."""
+    # =========================
+    # SLOT EXTRACTION
+    # =========================
+    def extract_slots(self, text: str) -> Dict:
         text = self.normalize_text(text)
+
         slots = {
             "occasion": None,
             "weather": None,
-            "vibe": None,
-            "life_category": None # Added new slot
+            "life_category": None
         }
 
-        for occasion, keywords in self.occasions.items():
-            if any(re.search(rf"\b{kw}\b", text) for kw in keywords):
+        # Occasion
+        for occasion, patterns in self.occasions.items():
+            if any(p.search(text) for p in patterns):
                 slots["occasion"] = occasion
                 break
 
-        for weather, keywords in self.weather_conditions.items():
-            if any(re.search(rf"\b{kw}\b", text) for kw in keywords):
+        # Weather
+        for weather, patterns in self.weather_conditions.items():
+            if any(p.search(text) for p in patterns):
                 slots["weather"] = weather
                 break
-                
-        # Find Life Category
-        for category, keywords in self.life_keywords.items():
-            if any(re.search(rf"\b{kw}\b", text) for kw in keywords):
+
+        # Life category
+        for category, patterns in self.life_keywords.items():
+            if any(p.search(text) for p in patterns):
                 slots["life_category"] = category
                 break
 
         return slots
 
-    def classify_intent(self, text: str) -> dict:
-        """The main function: Determines what the user is asking for."""
+    # =========================
+    # INTENT CLASSIFICATION
+    # =========================
+    def classify_intent(self, text: str) -> Dict:
         text = self.normalize_text(text)
         slots = self.extract_slots(text)
-        
-        # 1. Check if it is a Life Coach request
+
+        score = 0
+
+        # Life intent (highest priority)
         if slots["life_category"]:
             return {
                 "status": "success",
@@ -72,19 +96,27 @@ class IntentRouter:
                 "slots": slots,
                 "confidence": 0.95
             }
-        
-        # 2. Check if it is a styling request
-        is_styling = any(kw in text for kw in self.styling_keywords)
 
-        if is_styling or slots["occasion"] or slots["weather"]:
+        # Styling detection
+        styling_hits = sum(1 for p in self.styling_patterns if p.search(text))
+        if styling_hits:
+            score += styling_hits
+
+        if slots["occasion"]:
+            score += 2
+
+        if slots["weather"]:
+            score += 1
+
+        if score > 0:
             return {
                 "status": "success",
                 "intent": "styling",
                 "slots": slots,
-                "confidence": 0.9 if slots["occasion"] else 0.5
+                "confidence": min(0.5 + (score * 0.1), 0.95)
             }
-            
-        # 3. Fallback (Let LLaMA handle it)
+
+        # Fallback
         return {
             "status": "unrecognized",
             "intent": "unknown",
@@ -92,5 +124,6 @@ class IntentRouter:
             "confidence": 0.0
         }
 
-# Instantiate for easy import in other files
+
+# Singleton instance
 nlu_router = IntentRouter()

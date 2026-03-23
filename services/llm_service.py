@@ -1,16 +1,53 @@
 # backend/services/llm_service.py
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# Pointing to your local Ollama instance
+# =========================
+# CONFIG
+# =========================
 OLLAMA_URL = "http://localhost:11434/api"
 DEFAULT_MODEL = "llama3.1"
 
+# =========================
+# SESSION WITH RETRIES
+# =========================
+session = requests.Session()
+
+retries = Retry(
+    total=2,
+    backoff_factor=0.5,
+    status_forcelist=[500, 502, 503, 504],
+)
+
+session.mount("http://", HTTPAdapter(max_retries=retries))
+
+
+# =========================
+# SAFE REQUEST HANDLER
+# =========================
+def safe_request(endpoint: str, payload: dict, timeout: int = 30):
+    try:
+        response = session.post(f"{OLLAMA_URL}/{endpoint}", json=payload, timeout=timeout)
+
+        if response.status_code != 200:
+            print(f"\n🔥 OLLAMA ERROR ({endpoint}):")
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}\n")
+            return None
+
+        return response.json()
+
+    except Exception as e:
+        print(f"❌ LLM Request Failed ({endpoint}): {e}")
+        return None
+
+
+# =========================
+# TEXT GENERATION
+# =========================
 def generate_text(prompt: str, options: dict = None) -> str:
-    """
-    Generates a single text completion. 
-    Used by translation.py and memory updates.
-    """
     if not prompt:
         return "none"
 
@@ -19,41 +56,50 @@ def generate_text(prompt: str, options: dict = None) -> str:
         "prompt": prompt,
         "stream": False
     }
-    
+
     if options:
         payload["options"] = options
 
-    try:
-        response = requests.post(f"{OLLAMA_URL}/generate", json=payload, timeout=60)
-        
-        # 🚨 FIX: Print the ACTUAL error message from Ollama before crashing
-        if response.status_code != 200:
-            print(f"\n🔥 OLLAMA ERROR DETAILS (generate_text):")
-            print(f"Status: {response.status_code}")
-            print(f"Message: {response.text}\n")
-            
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except Exception as e:
-        print(f"❌ LLM Request Failed (generate_text): {e}")
-        return "none" # Returning 'none' prevents the chat.py memory from being wiped
+    data = safe_request("generate", payload, timeout=30)
 
+    if not data:
+        return "none"
+
+    return data.get("response", "").strip() or "none"
+
+
+# =========================
+# CHAT COMPLETION
+# =========================
 def chat_completion(messages: list, system_instruction: str = "") -> str:
-    """
-    Handles multi-turn chat completions.
-    Used by the main text_chat endpoint in chat.py.
-    """
+
     if not messages:
         return "I didn't catch that!"
 
     formatted_messages = []
-    
-    # Inject the system instructions (Personality, Rules, Memory)
+
+    # ✅ SYSTEM MESSAGE SAFETY
     if system_instruction:
-        formatted_messages.append({"role": "system", "content": system_instruction})
-        
-    # Append the recent chat history
-    formatted_messages.extend(messages)
+        formatted_messages.append({
+            "role": "system",
+            "content": system_instruction[:8000]  # prevent overload
+        })
+
+    # ✅ LIMIT HISTORY SIZE
+    safe_messages = messages[-10:]  # last 10 only
+
+    for msg in safe_messages:
+        role = msg.get("role", "user").lower()
+        if role not in ["user", "assistant", "system"]:
+            role = "assistant"
+
+        content = str(msg.get("content", ""))[:4000]
+
+        if content:
+            formatted_messages.append({
+                "role": role,
+                "content": content
+            })
 
     payload = {
         "model": DEFAULT_MODEL,
@@ -61,33 +107,30 @@ def chat_completion(messages: list, system_instruction: str = "") -> str:
         "stream": False
     }
 
+    data = safe_request("chat", payload, timeout=45)
+
+    if not data:
+        return "I'm having trouble thinking right now 😅 Try again in a moment."
+
     try:
-        response = requests.post(f"{OLLAMA_URL}/chat", json=payload, timeout=60)
-        
-        # 🚨 FIX: Print the ACTUAL error message from Ollama before crashing
-        if response.status_code != 200:
-            print(f"\n🔥 OLLAMA ERROR DETAILS (chat_completion):")
-            print(f"Status: {response.status_code}")
-            print(f"Message: {response.text}\n")
+        return data.get("message", {}).get("content", "").strip() or "Something went wrong 😅"
+    except Exception:
+        return "AI response parsing failed 😅"
 
-        response.raise_for_status()
-        return response.json().get("message", {}).get("content", "").strip()
-    except Exception as e:
-        print(f"❌ LLM Request Failed (chat_completion): {e}")
-        return "Oops, my style brain glitched for a second! Can you repeat that?"
 
+# =========================
+# WARDROBE FORMATTER
+# =========================
 def format_wardrobe_for_llm(items):
-    """
-    Converts Appwrite documents into a text summary for the AI.
-    """
     if not items:
         return "The user's wardrobe is currently empty."
-    
+
     wardrobe_msg = "The user has the following items in their wardrobe:\n"
-    for item in items:
+
+    for item in items[:50]:  # ✅ LIMIT SIZE
         name = item.get('name', 'Item')
         color = item.get('color', '')
         category = item.get('category', '')
         wardrobe_msg += f"- {name} ({color} {category})\n"
-    
+
     return wardrobe_msg
