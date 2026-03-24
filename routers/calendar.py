@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 import traceback
 
-from brain.engines.calendar_engine import calendar_engine
+from brain.archive.calendar_engine import calendar_engine
 from brain.utils.calendar_formatter import build_calendar_checklist_bundle
 from middleware.auth_middleware import get_current_user  # 🔥 NEW
 

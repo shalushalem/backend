@@ -11,13 +11,13 @@ class ResponseAssembler:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         # 🔥 Load Assembly Profiles
-        profile_path = os.path.join(base_dir, "config", "assembly_profiles_v1.json")
+        profile_path = os.path.join(base_dir, "config", "assembly_profiles.json")
 
         try:
             with open(profile_path, "r", encoding="utf-8") as f:
-                self.config = json.load(f).get("assembly_profiles_v1", {})
+                self.config = json.load(f).get("assembly_profiles", {})
         except Exception as e:
-            print("⚠️ Assembly profile load failed:", e)
+            print(f"WARN: Assembly profile load failed: {e}")
             self.config = {}
 
     # =========================

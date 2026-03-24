@@ -6,11 +6,11 @@ class ShoppingRouter:
 
     def __init__(self):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        file_path = os.path.join(base_dir, "config", "shopping_router_map_v2.json")
+        file_path = os.path.join(base_dir, "config", "shopping_router_map.json")
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                self.map = json.load(f).get("shopping_router_map_v2", {})
+                self.map = json.load(f).get("shopping_router_map", {})
         except Exception as e:
             print("⚠️ Shopping router load failed:", e)
             self.map = {}

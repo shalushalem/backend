@@ -9,7 +9,7 @@ from pydantic import BaseModel, validator
 from transformers import AutoModelForImageSegmentation
 from torchvision import transforms
 
-print("🔥 CLEAN BG_REMOVER LOADED")
+print("BG_REMOVER LOADED")
 
 router = APIRouter()
 
@@ -33,7 +33,7 @@ model = None
 model_lock = threading.Lock()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print(f"⚙️ Using device: {device}")
+print(f"Using device: {device}")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "..", "RMBG_2_0")
@@ -60,7 +60,7 @@ def load_model():
             return model
 
         try:
-            print("📁 Loading model from:", MODEL_PATH)
+            print("Loading model from:", MODEL_PATH)
 
             if not os.path.exists(MODEL_PATH):
                 raise Exception(f"Model folder not found: {MODEL_PATH}")
@@ -74,10 +74,10 @@ def load_model():
             model_local.to(device).eval()
             model = model_local
 
-            print("✅ Model Ready!")
+            print("Model ready.")
 
         except Exception as e:
-            print("❌ Model load failed:", e)
+            print("Model load failed:", e)
             model = None
 
     return model
@@ -137,5 +137,5 @@ async def remove_background(request: BGRemoveRequest):
     except HTTPException:
         raise
     except Exception as e:
-        print("❌ BG Error:", e)
+        print("BG error:", e)
         raise HTTPException(status_code=500, detail="Processing failed")

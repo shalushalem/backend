@@ -1,8 +1,14 @@
-# backend/brain/personalization/style_dna_engine.py
+# backend/brain/archive/style_dna_engine.py
 
 from typing import Dict, Any, List
 
+
 class StyleDNAEngine:
+    def build(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        profile = context.get("user_profile") or {}
+        history = context.get("history") or []
+        return self._build_dna(profile, history)
+
     def enrich_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         profile = context.get("user_profile", {})
         history = context.get("history", [])
@@ -19,7 +25,7 @@ class StyleDNAEngine:
         return {
             "style": style,
             "preferred_colors": preferred_colors,
-            "disliked_items": []
+            "disliked_items": [],
         }
 
     def score_item(self, item: Dict[str, Any], dna: Dict[str, Any]) -> int:
@@ -36,4 +42,7 @@ class StyleDNAEngine:
 
         return score
 
+
 style_dna_engine = StyleDNAEngine()
+
+__all__ = ["style_dna_engine", "StyleDNAEngine"]

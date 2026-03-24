@@ -7,16 +7,27 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from celery import Celery
 import sentry_sdk
 from sentry_sdk.integrations.celery import CeleryIntegration
-from sentry_sdk.integrations.redis import RedisIntegration
+try:
+    from sentry_sdk.integrations.redis import RedisIntegration
+except Exception:
+    RedisIntegration = None
+
+def _has_redis_client() -> bool:
+    try:
+        import redis  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 # 🚀 INITIALIZE SENTRY FOR CELERY
+_sentry_integrations = [CeleryIntegration()]  # Catches failing background tasks
+if RedisIntegration is not None and _has_redis_client():
+    _sentry_integrations.append(RedisIntegration())
+
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN", "https://048fb4207a04a4a4208a1a97af611e1e@o4511020944392192.ingest.de.sentry.io/4511020965888080"), # <--- Replace with your Sentry DSN!
     traces_sample_rate=1.0,
-    integrations=[
-        CeleryIntegration(), # Catches failing background tasks
-        RedisIntegration(),
-    ],
+    integrations=_sentry_integrations,
 )
 
 # Connect Celery to your local Redis server

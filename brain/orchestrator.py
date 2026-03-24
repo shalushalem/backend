@@ -1,18 +1,22 @@
 import traceback
-from typing import Dict, Any, Tuple
+import uuid
+from typing import Dict, Any, Tuple, Callable
 
 # =========================
 # ENGINE IMPORTS
 # =========================
-from brain.engines.fitness_engine import fitness_engine
-from brain.engines.meal_planner_engine import meal_planner_engine
-from brain.engines.organize_engine import organize_engine
-from brain.engines.plan_engine import plan_engine
+from brain.engines.fitness.fitness_engine import fitness_engine
+from brain.engines.meals.meal_planner_engine import meal_planner_engine
+from brain.engines.organize.organize_engine import organize_engine
+from brain.engines.planning.plan_engine import plan_engine
 
-from brain.shopping.shopping_system import shopping_system
+try:
+    from brain.shopping.shopping_system import shopping_system
+except Exception:
+    shopping_system = None
 from brain.engines.calendar_runtime import run_calendar_runtime
-from brain.engines.packing_engine import packing_engine
-from brain.engines.style_builder import style_engine
+from brain.engines.packing.packing_engine import packing_engine
+from brain.engines.styling.style_builder import style_engine
 
 # =========================
 # CORE SYSTEMS
@@ -33,33 +37,38 @@ class AhviOrchestrator:
         """
 
         context = context or {}
+        request_id = str(uuid.uuid4())
 
         try:
             # =========================
-            # STEP 0 — CONTEXT ENRICHMENT 🧠
-            # =========================
-            enriched_context = context_engine.build_context({
-                "text": text,
-                "user_profile": context.get("user_profile"),
-                "signals": context.get("signals"),
-                "wardrobe": context.get("wardrobe", [])
-            })
-
-            # 🔥 STYLE DNA
-            style_dna = style_dna_engine.build({
-                "user_profile": context.get("user_profile"),
-                "signals": context.get("signals"),
-                "wardrobe": context.get("wardrobe", [])
-            })
-
-            enriched_context["style_dna"] = style_dna
-
-            # =========================
-            # STEP 1 — INTENT DETECTION
+            # STEP 0 ? INTENT DETECTION
             # =========================
             mode, domain = self._detect_mode_domain(text)
 
             # =========================
+            # STEP 1 ? CONTEXT ENRICHMENT ??
+            # =========================
+            intent_data = {"intent": domain, "slots": {}, "confidence": 1.0}
+            enriched_context = context_engine.build_context(
+                user_id or "anonymous",
+                intent_data,
+                wardrobe=context.get("wardrobe", []),
+                user_profile=context.get("user_profile"),
+                history=context.get("history", []),
+                vision=context.get("vision"),
+            )
+
+            # ?? STYLE DNA
+            if hasattr(style_dna_engine, "build"):
+                style_dna = style_dna_engine.build({
+                    "user_profile": context.get("user_profile"),
+                    "signals": context.get("signals"),
+                    "wardrobe": context.get("wardrobe", [])
+                })
+                enriched_context["style_dna"] = style_dna
+            elif hasattr(style_dna_engine, "enrich_context"):
+                enriched_context = style_dna_engine.enrich_context(enriched_context)
+
             # STEP 2 — ENGINE EXECUTION
             # =========================
             engine_output = self._run_engine(
@@ -93,22 +102,28 @@ class AhviOrchestrator:
             # =========================
             return {
                 "success": True,
+                "request_id": request_id,
                 "meta": {
                     "mode": mode,
                     "domain": domain
                 },
-                "data": {
-                    "message": final_text,
-                    "raw": engine_output
-                }
+                "message": final_text,
+                "data": engine_output.get("data", {}),
+                "cards": engine_output.get("cards", []),
+                "actions": engine_output.get("actions", [])
             }
 
         except Exception:
-            print("❌ Orchestrator error:\n", traceback.format_exc())
+            print("ERROR: Orchestrator error:\n", traceback.format_exc())
 
             return {
                 "success": False,
-                "error": "Something went wrong"
+                "request_id": request_id,
+                "error": {
+                    "code": "ORCHESTRATOR_ERROR",
+                    "message": "Something went wrong",
+                    "details": request_id
+                }
             }
 
     # =========================
@@ -154,51 +169,110 @@ class AhviOrchestrator:
     # =========================
     # ENGINE ROUTER (SCALABLE)
     # =========================
+    def _safe_engine_call(self, fn: Callable, text: str, context: Dict, user_id: str):
+        """
+        Call engines with backward-compatible signatures.
+        """
+        try:
+            return fn(text, context, user_id)
+        except TypeError:
+            try:
+                return fn(text, context)
+            except TypeError:
+                return fn(text)
+
     def _run_engine(self, mode, domain, text, context, user_id):
 
         ENGINE_MAP = {
 
             # 🔥 SHOPPING
-            ("style", "shopping"): lambda t, c, u: shopping_system.run(
-                t,
-                {
-                    "signals": c.get("signals"),
-                    "wardrobe": c.get("wardrobe", []),
-                    "product_candidate": c.get("product_candidate"),
-                    "style_dna": c.get("style_dna")
+            ("style", "shopping"): lambda t, c, u: (
+                self._normalize_output(
+                    shopping_system.run(
+                        t,
+                        {
+                            "signals": c.get("signals"),
+                            "wardrobe": c.get("wardrobe", []),
+                            "product_candidate": c.get("product_candidate"),
+                            "style_dna": c.get("style_dna"),
+                            "user_id": u,
+                        }
+                    )
+                )
+                if shopping_system is not None
+                else {
+                    "message": "Shopping engine is unavailable right now.",
+                    "data": {},
+                    "cards": [],
+                    "actions": []
                 }
             ),
 
             # 🔥 STYLING
-            ("style", "styling"): lambda t, c, u: style_engine.build_outfit({
-                "slots": c.get("slots", {}),
-                "wardrobe": c.get("wardrobe", []),
-                "style_dna": c.get("style_dna")
+            ("style", "styling"): lambda t, c, u: self._normalize_output({
+                "message": "",
+                "data": style_engine.build_outfit({
+                    "slots": c.get("slots", {}),
+                    "wardrobe": c.get("wardrobe", []),
+                    "style_dna": c.get("style_dna"),
+                    "user_id": u,
+                }),
+                "cards": [],
+                "actions": []
             }),
 
             # 🔥 PACKING
-            ("plan", "packing"): lambda t, c, u: packing_engine.build_packing_list({
-                "days": c.get("days", 3),
-                "purpose": c.get("purpose"),
-                "gender": c.get("gender", "women")
+            ("plan", "packing"): lambda t, c, u: self._normalize_output({
+                "message": "",
+                "data": (
+                    packing_engine.build_packing_list({
+                        "days": c.get("days", 3),
+                        "purpose": c.get("purpose"),
+                        "gender": c.get("gender", "women"),
+                        "user_id": u,
+                    })
+                    if hasattr(packing_engine, "build_packing_list")
+                    else packing_engine.build_packing({
+                        "days": c.get("days", 3),
+                        "purpose": c.get("purpose"),
+                        "gender": c.get("gender", "women"),
+                        "user_id": u,
+                    })
+                ),
+                "cards": [],
+                "actions": []
             }),
 
             # 🔥 CALENDAR
-            ("plan", "calendar"): lambda t, c, u: run_calendar_runtime({
-                "title": t
+            ("plan", "calendar"): lambda t, c, u: self._normalize_output({
+                "message": "",
+                "data": run_calendar_runtime({
+                    "title": t,
+                    "user_id": u
+                }),
+                "cards": [],
+                "actions": []
             }),
 
             # 🔥 FITNESS
-            ("health", "fitness"): lambda t, c, u: fitness_engine.run(t, c),
+            ("health", "fitness"): lambda t, c, u: self._normalize_output(
+                self._safe_engine_call(fitness_engine.run, t, c, u)
+            ),
 
             # 🔥 MEALS
-            ("health", "meals"): lambda t, c, u: meal_planner_engine.run(t, c),
+            ("health", "meals"): lambda t, c, u: self._normalize_output(
+                self._safe_engine_call(meal_planner_engine.run, t, c, u)
+            ),
 
             # 🔥 ORGANIZE
-            ("organize", "tasks"): lambda t, c, u: organize_engine.run(t, c),
+            ("organize", "tasks"): lambda t, c, u: self._normalize_output(
+                self._safe_engine_call(organize_engine.run, t, c, u)
+            ),
 
             # 🔥 GENERAL PLANNING
-            ("plan", "general"): lambda t, c, u: plan_engine.run(t, c),
+            ("plan", "general"): lambda t, c, u: self._normalize_output(
+                self._safe_engine_call(plan_engine.run, t, c, u)
+            ),
         }
 
         handler = ENGINE_MAP.get((mode, domain))
@@ -207,7 +281,10 @@ class AhviOrchestrator:
             return handler(text, context, user_id)
 
         return {
-            "message": "Tell me what you need — I’ll help you figure it out."
+            "message": "Tell me what you need — I'll help you figure it out.",
+            "data": {},
+            "cards": [],
+            "actions": []
         }
 
     # =========================

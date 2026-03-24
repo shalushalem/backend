@@ -13,7 +13,7 @@ class ToneEngine:
             with open(file_path, "r", encoding="utf-8") as f:
                 self.config = json.load(f).get("ahvi_tone_engine_v1", {})
         except Exception as e:
-            print("⚠️ Tone engine load failed:", e)
+            print(f"WARN: Tone engine load failed: {e}")
             self.config = {}
 
     # =========================
